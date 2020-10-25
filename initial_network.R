@@ -1,41 +1,46 @@
 library(dagitty)
+library(ggplot2)
 
-# full network is specified below with yet unavailable
-# variables commented
-g <- dagitty(paste('dag {
-  atemp [pos="-0.372,0.106"]
-  autumn [pos="-0.282,-0.353"]
-  casual [pos="-0.090,0.121"]',
-  # daylength [pos="-0.172,-0.169"]',
-  # gasprice [pos="0.198,0.029"]
-  'holiday [pos="-0.083,-0.220"]
-  hum [pos="-0.282,-0.036"]
-  mnth [pos="-0.161,-0.407"]
-  registered [pos="0.102,0.129"]
-  spring [pos="-0.402,-0.356"]
-  summer [pos="-0.345,-0.359"]
-  temp [pos="-0.458,-0.041"]
-  cnt [pos="0.014,0.316"]
-  weathersit [pos="-0.264,-0.209"]
-  weatherlatent [latent,pos="-0.360,-0.170"]',
-  # winddirection [pos="-0.458,-0.169"]
-  'windspeed [pos="-0.366,-0.039"]
-  winter [pos="-0.471,-0.358"]
-  workingday [pos="0.111,-0.221"]
+# full Bayesian network is specified below
+g <- dagitty(paste('dag {',
+  ####################################
+  #            Variables             #
+  ####################################                   
+  # weather variables
+  'atemp [pos="-0.368,-0.285"]
+  autumn [pos="-0.497,-0.095"]
+  casual [pos="-0.301,-0.085"]
+  cnt [pos="-0.271,-0.241"]
+  day [pos="-0.333,-0.445"]
+  daylength [pos="-0.438,-0.082"]
+  gasprice [pos="-0.441,-0.384"]
+  holiday [pos="-0.311,-0.249"]
+  hum [pos="-0.390,-0.354"]
+  rallyprotest [pos="-0.334,-0.035"]
+  registered [pos="-0.302,-0.381"]
+  spring [pos="-0.499,-0.287"]
+  summer [pos="-0.498,-0.188"]
+  temp [pos="-0.389,-0.216"]
+  weatherlatent [latent,pos="-0.438,-0.286"]
+  weathersit [pos="-0.438,-0.185"]
+  windspeed [pos="-0.389,-0.285"]
+  winter [pos="-0.499,-0.384"]
+  workingday [pos="-0.334,-0.249"]',
   
-  winter -> {weatherlatent}', # winddirection}
-  'spring -> {weatherlatent}', # winddirection}
-  'summer -> {weatherlatent}', # winddirection}
-  'autumn -> {weatherlatent}', # winddirection}
-  # winddirection -> temp
-  'weatherlatent -> {hum temp weathersit windspeed}
-  {hum temp windspeed} -> atemp',
-  # mnth -> daylength
-  '{atemp workingday holiday} -> casual',
-  # daylength -> casual
-  '{atemp workingday holiday} -> registered',
-  # gasprice -> registered
-  '{casual registered} -> cnt
+  ####################################
+  #            Relations             #
+  ####################################
+  # weather relations
+  '{winter spring summer autumn} -> {winter spring summer autumn}
+  {winter spring summer autumn} -> {weatherlatent daylength gasprice}
+  daylength -> temp
+  weatherlatent -> {weathersit temp windspeed hum}
+  {temp windspeed hum} -> atemp',
+  
+  # outcome relations
+  '{atemp workingday holiday daylength rallyprotest} -> casual
+  {atemp workingday holiday day gasprice} -> registered
+  {casual registered} -> cnt
 }'))
 plot(g)
 
@@ -54,26 +59,52 @@ data <- cbind(data, spring)
 data <- cbind(data, summer)
 data <- cbind(data, autumn)
 
-# convert month variable to continuous ratio variable
-mnth.since.launch <- data$yr * 12 + data$mnth + 3
-data$mnth <- mnth.since.launch
+# convert year and instant variables to continuous ratio variable
+data$day <- data$instant + 112
 
-# add the other variables
-daylength <- ...
-data <- cbind(data, daylength)
+# add day length
+data$daylength <- 0
+L <- 38.8951  # latitude Washington D.C.
+for (J in 1:731) 
+{
+  P = asin(0.39795 * cos(0.2163108 + 2 * atan(0.9671396 * tan(.00860 * (J - 186)))))
+  
+  D <- 24 - (24 / pi) * 
+    acos(
+      (sin(0.8333 * pi / 180) + sin(L * pi / 180) * sin(P))
+        / 
+      (cos(L * pi / 180) * cos(P))
+    )
+  data$daylength[J] <- D
+}
 
-gasprice <- ...
-data <- cbind(data, gasprice)
+# add monthly gasoline price
+gasprice.per.month <- c(
+  0.82, 0.85, 0.94, 1, 1.03, 0.97, 0.96, 0.96, 0.95, 0.91, 0.89, 0.86,
+  0.89, 0.94, 1.02, 1.03, 0.98, 0.93, 0.91, 0.98, 1.02, 0.99, 0.91, 0.87
+)
+data$mnth <- data$yr * 12 + data$mnth
+data$gasprice <- 0
+for (J in 1:731)
+{
+  G <- gasprice.per.month[data$mnth[J]]
+  data$gasprice[J] <- G
+}
 
-windirection <- ...
-data <- cbind(data, winddirection)
+# add rallies and protest marches
+rallies.and.protests <- c(
+  274, 288, 289, 313, 314, 315, 316, 317, 318, 319, 320, 321,
+  322, 323, 324, 325, 326, 327, 376, 416, 449, 575, 673, 687
+)
+data$rallyprotest <- as.numeric(data$instant %in% rallies.and.protests)
 
 # remove all variables not present in model
-data <- subset(data, select=-c(instant, yr, dteday, season, weekday))
+data <- subset(data, select=-c(instant, yr, dteday, season, weekday, mnth))
 
 
 
 # perform conditional independence tests
-# a small p-value is bad, as that indicates a dependence
-# still need to convert these p-values to effect sizes
-localTests(g, data)
+# - a small p-value is bad, as that indicates a dependence
+# - still need to convert these p-values to effect sizes
+results <- localTests(g, data)
+results[results$p.value < 1e-20,]
