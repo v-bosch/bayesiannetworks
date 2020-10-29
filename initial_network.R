@@ -1,5 +1,8 @@
-library(dagitty)
+library(dagitty) 
+library(lavaan)
+library(bnlearn)
 library(ggplot2)
+library(zoo)
 
 # full Bayesian network is specified below
 g <- dagitty(paste('dag {',
@@ -10,7 +13,6 @@ g <- dagitty(paste('dag {',
   'atemp [pos="-0.368,-0.285"]
   autumn [pos="-0.497,-0.095"]
   casual [pos="-0.301,-0.085"]
-  cnt [pos="-0.271,-0.241"]
   day [pos="-0.333,-0.445"]
   daylength [pos="-0.438,-0.082"]
   gasprice [pos="-0.441,-0.384"]
@@ -31,16 +33,16 @@ g <- dagitty(paste('dag {',
   #            Relations             #
   ####################################
   # weather relations
-  '{winter spring summer autumn} -> {winter spring summer autumn}
+  'winter -> {spring -> {summer -> autumn}}
   {winter spring summer autumn} -> {weatherlatent daylength gasprice}
   daylength -> temp
   weatherlatent -> {weathersit temp windspeed hum}
   {temp windspeed hum} -> atemp',
   
   # outcome relations
-  '{atemp workingday holiday daylength rallyprotest} -> casual
+  '{atemp workingday holiday rallyprotest} -> casual
   {atemp workingday holiday day gasprice} -> registered
-  {casual registered} -> cnt
+  casual <-> registered
 }'))
 plot(g)
 
@@ -50,10 +52,10 @@ plot(g)
 data <- read.csv("day.csv", header=TRUE)
 
 # convert season variable to 4 binary variables
-winter <- as.numeric(data$season == 1)
-spring <- as.numeric(data$season == 2)
-summer <- as.numeric(data$season == 3)
-autumn <- as.numeric(data$season == 4)
+winter <- data$season == 1
+spring <- data$season == 2
+summer <- data$season == 3
+autumn <- data$season == 4
 data <- cbind(data, winter)
 data <- cbind(data, spring)
 data <- cbind(data, summer)
@@ -96,10 +98,10 @@ rallies.and.protests <- c(
   274, 288, 289, 313, 314, 315, 316, 317, 318, 319, 320, 321,
   322, 323, 324, 325, 326, 327, 376, 416, 449, 575, 673, 687
 )
-data$rallyprotest <- as.numeric(data$instant %in% rallies.and.protests)
+data$rallyprotest <- data$instant %in% rallies.and.protests
 
 # remove all variables not present in model
-data <- subset(data, select=-c(instant, yr, dteday, season, weekday, mnth))
+data <- subset(data, select=-c(instant, yr, dteday, season, weekday, mnth, cnt))
 
 
 
@@ -108,3 +110,17 @@ data <- subset(data, select=-c(instant, yr, dteday, season, weekday, mnth))
 # - still need to convert these p-values to effect sizes
 results <- localTests(g, data)
 results[results$p.value < 1e-20,]
+
+scaled.data <- data.frame(scale(data))
+summary(lm(scaled.data$autumn ~ scaled.data$day))
+
+t <- 35
+ggplot() + geom_line(aes(x=1:(731-t+1), y=rollmean(data$weathersit, k=t)))
+ggplot(data) + geom_point(aes(x=day, y=winter))
+summary(lm(data$gasprice ~ data$day))
+
+
+data <- data.frame(lapply(data, as.numeric))
+net <- toString(g,"lavaan")
+fit1 <- sem(net, scale(data))
+
