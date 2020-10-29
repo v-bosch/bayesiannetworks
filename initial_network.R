@@ -41,9 +41,9 @@ g <- dagitty(paste('dag {',
   
   # outcome relations
   '{atemp workingday holiday rallyprotest} -> casual
-  {atemp workingday holiday day gasprice} -> registered
-  casual <-> registered
-}'))
+  {atemp workingday holiday day gasprice} -> registered',
+  # casual <-> registered
+'}'))
 plot(g)
 
 
@@ -108,7 +108,7 @@ data <- subset(data, select=-c(instant, yr, dteday, season, weekday, mnth, cnt))
 # perform conditional independence tests
 # - a small p-value is bad, as that indicates a dependence
 # - still need to convert these p-values to effect sizes
-results <- localTests(g, data)
+results <- localTests(g, data, type="tetrads")
 results[results$p.value < 1e-20,]
 
 scaled.data <- data.frame(scale(data))
@@ -120,7 +120,10 @@ ggplot(data) + geom_point(aes(x=day, y=winter))
 summary(lm(data$gasprice ~ data$day))
 
 
-data <- data.frame(lapply(data, as.numeric))
+scaled.data <- data.frame(lapply(scaled.data, as.numeric))
 net <- toString(g,"lavaan")
-fit1 <- sem(net, scale(data))
+fit1 <- sem(net, scaled.data)
 
+net <- model2network(toString(g,"bnlearn"))
+fit <- bn.fit( net, scaled.data, sample.nobs=nrow(data))
+fit
