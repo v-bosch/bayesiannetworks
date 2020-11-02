@@ -1,7 +1,5 @@
 library(dagitty)
 library(lavaan)
-library(ggplot2)
-library(ppcor)
 
 # full Bayesian network is specified below
 g <- dagitty(paste('dag {',
@@ -13,32 +11,31 @@ g <- dagitty(paste('dag {',
   casual [pos="-0.352,-0.207"]
   daylength [pos="-0.411,-0.159"]
   gasprice [pos="-0.416,-0.225"]
-  holiday [pos="-0.314,-0.201"]
-  hum [pos="-0.426,-0.447"]
-  instant [pos="-0.315,-0.260"]
-  rallyprotest [pos="-0.356,-0.129"]
-  registered [pos="-0.352,-0.304"]
-  spring [pos="-0.481,-0.199"]
-  temp [pos="-0.406,-0.356"]
+  instant [pos="-0.314,-0.171"]
+  hum [pos="-0.426,-0.447"]',
+  # 'holiday [pos="-0.315,-0.260"]',
+  # rallyprotest [pos="-0.356,-0.129"]
+  'registered [pos="-0.352,-0.304"]',
+  'temp [pos="-0.406,-0.356"]
   weatherlatent [latent,pos="-0.464,-0.300"]
   weathersit [pos="-0.483,-0.295"]
   windspeed [pos="-0.420,-0.397"]
-  winter [pos="-0.483,-0.251"]
-  workingday [pos="-0.317,-0.332"]
-  yearly [latent,pos="-0.462,-0.230"]',
+  warm [pos="-0.483,-0.251"]
+  workingday [pos="-0.317,-0.332"]',
   
   ####################################
   #            Relations             #
   ####################################
   # weather relations
-  'yearly -> {winter spring}
-  yearly -> {weatherlatent daylength gasprice}',
+  '{warm} -> {weatherlatent daylength gasprice}',
+  'instant -> gasprice',
   'weatherlatent -> {hum windspeed temp weathersit}',
+  'daylength -> temp',
   '{hum temp windspeed} -> atemp',
   
   # outcome relations
-  '{instant gasprice atemp workingday weatherlatent} -> registered
-  {instant atemp workingday gasprice weatherlatent} -> casual
+  '{instant gasprice atemp hum} -> registered
+  {instant atemp workingday} -> casual
 }'))
 plot(g)
 
@@ -47,11 +44,8 @@ plot(g)
 data <- read.csv("day.csv", header=TRUE)
 
 # convert season variable to 4 binary variables
-winter <- data$instant %% 365 > 122 & data$instant %% 365 < 243
-spring <- data$instant %% 365 < 61 | data$instant %% 365 > 304 | 
-  data$instant %% 365 > 152 & data$instant %% 365 < 213
-data <- cbind(data, winter)
-data <- cbind(data, spring)
+warm <- data$season == 2 | data$season == 3
+data <- cbind(data, warm)
 
 # add day length
 data$daylength <- 0
@@ -72,16 +66,25 @@ for (J in 1:731)
 data$workingday <- data$weekday < 5
 
 # add monthly gasoline price
-gasprice.per.month <- c(
-  0.82, 0.85, 0.94, 1, 1.03, 0.97, 0.96, 0.96, 0.95, 0.91, 0.89, 0.86,
-  0.89, 0.94, 1.02, 1.03, 0.98, 0.93, 0.91, 0.98, 1.02, 0.99, 0.91, 0.87
+gasprice.per.week <- c(
+  3.114, 3.129, 3.141, 3.164, 3.172, 3.165, 3.175, 3.181, 3.209, 3.37, 3.519,
+  3.567, 3.562, 3.576, 3.657, 3.757, 3.828, 3.898, 3.981, 4, 3.993, 3.912,
+  3.847, 3.805, 3.766, 3.727, 3.672, 3.634, 3.687, 3.738, 3.759, 3.772, 3.738,
+  3.67, 3.625, 3.626, 3.666, 3.667, 3.634, 3.567, 3.504, 3.462, 3.498, 3.494,
+  3.476, 3.454, 3.454, 3.416, 3.373, 3.338, 3.334, 3.309, 3.313, 3.346, 3.44,
+  3.46, 3.494, 3.548, 3.571, 3.627, 3.67, 3.748, 3.78, 3.793, 3.828, 3.882,
+  3.924, 3.974, 3.955, 3.93, 3.874, 3.809, 3.764, 3.715, 3.657, 3.603, 3.534,
+  3.477, 3.417, 3.384, 3.434, 3.482, 3.564, 3.569, 3.637, 3.725, 3.75, 3.781,
+  3.823, 3.86, 3.953, 3.907, 3.893, 3.911, 3.877, 3.787, 3.692, 3.677, 3.66,
+  3.657, 3.637, 3.594, 3.545, 3.486, 3.471, 3.5
 )
-data$mnth <- data$yr * 12 + data$mnth
+i <- 1
 data$gasprice <- 0
 for (J in 1:731)
 {
-  G <- gasprice.per.month[data$mnth[J]]
-  data$gasprice[J] <- G
+  if (data$weekday[J] == 1) {i <- i + 1}
+  
+  data$gasprice[J] <- gasprice.per.week[i]
 }
 
 # add rallies and protest marches
@@ -92,7 +95,7 @@ rallies.and.protests <- c(
 data$rallyprotest <- data$instant %in% rallies.and.protests
 
 # remove all variables not present in model
-data <- subset(data, select=-c(yr, dteday, season, weekday, mnth, cnt))
+data <- subset(data, select=-c(yr, dteday, weekday, season, mnth, cnt, holiday, rallyprotest))
 scaled.data <- data.frame(scale(data))
 
 
@@ -106,14 +109,17 @@ top.results
 plotLocalTestResults(results)
 
 
+
 # fit data to SEM using lavaan package
-# create covariance matrix for multivariate Gaussian
+# create covariance matrix for multivariate Gaussian model
 net <- toString(g,"lavaan")
-fit1 <- sem(net, scaled.data)
-summary(fit1)
+fit <- sem(net, scaled.data, estimator="WLSMV")
+summary(fit)
 
-ggplot(data) + geom_point(aes(x=instant, y=casual))
-pcor(subset(scaled.data, select=c(registered, holiday)))
-
-lavaanPlot(model = fit1, node_options = list(shape = "box", fontname = "Helvetica"), edge_options = list(color = "grey"), coefs = T)
-
+# show SEM with coefficients
+lavaanPlot(
+    model=fit1,
+    node_options=list(shape="box", fontname="Helvetica"),
+    edge_options=list(color="grey"),
+    coefs=TRUE
+)
