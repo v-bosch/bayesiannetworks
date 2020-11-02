@@ -1,8 +1,7 @@
-library(dagitty) 
+library(dagitty)
 library(lavaan)
-library(bnlearn)
 library(ggplot2)
-library(zoo)
+library(ppcor)
 
 # full Bayesian network is specified below
 g <- dagitty(paste('dag {',
@@ -10,59 +9,49 @@ g <- dagitty(paste('dag {',
   #            Variables             #
   ####################################                   
   # weather variables
-  'atemp [pos="-0.368,-0.285"]
-  autumn [pos="-0.497,-0.095"]
-  casual [pos="-0.301,-0.085"]
-  day [pos="-0.333,-0.445"]
-  daylength [pos="-0.438,-0.082"]
-  gasprice [pos="-0.441,-0.384"]
-  holiday [pos="-0.311,-0.249"]
-  hum [pos="-0.390,-0.354"]
-  rallyprotest [pos="-0.334,-0.035"]
-  registered [pos="-0.302,-0.381"]
-  spring [pos="-0.499,-0.287"]
-  summer [pos="-0.498,-0.188"]
-  temp [pos="-0.389,-0.216"]
-  weatherlatent [latent,pos="-0.438,-0.286"]
-  weathersit [pos="-0.438,-0.185"]
-  windspeed [pos="-0.389,-0.285"]
-  winter [pos="-0.499,-0.384"]
-  workingday [pos="-0.334,-0.249"]',
+  'atemp [pos="-0.396,-0.445"]
+  casual [pos="-0.352,-0.207"]
+  daylength [pos="-0.411,-0.159"]
+  gasprice [pos="-0.416,-0.225"]
+  holiday [pos="-0.314,-0.201"]
+  hum [pos="-0.426,-0.447"]
+  instant [pos="-0.315,-0.260"]
+  rallyprotest [pos="-0.356,-0.129"]
+  registered [pos="-0.352,-0.304"]
+  spring [pos="-0.481,-0.199"]
+  temp [pos="-0.406,-0.356"]
+  weatherlatent [latent,pos="-0.464,-0.300"]
+  weathersit [pos="-0.483,-0.295"]
+  windspeed [pos="-0.420,-0.397"]
+  winter [pos="-0.483,-0.251"]
+  workingday [pos="-0.317,-0.332"]
+  yearly [latent,pos="-0.462,-0.230"]',
   
   ####################################
   #            Relations             #
   ####################################
   # weather relations
-  'winter -> {spring -> {summer -> autumn}}
-  {winter spring summer autumn} -> {weatherlatent daylength gasprice}
-  daylength -> temp
-  weatherlatent -> {weathersit temp windspeed hum}
-  {temp windspeed hum} -> atemp',
+  'yearly -> {winter spring}
+  yearly -> {weatherlatent daylength gasprice}',
+  'weatherlatent -> {hum windspeed temp weathersit}',
+  '{hum temp windspeed} -> atemp',
   
   # outcome relations
-  '{atemp workingday holiday rallyprotest} -> casual
-  {atemp workingday holiday day gasprice} -> registered',
-  # casual <-> registered
-'}'))
+  '{instant gasprice atemp workingday weatherlatent} -> registered
+  {instant atemp workingday gasprice weatherlatent} -> casual
+}'))
 plot(g)
-
 
 
 # read bikeshare data from storage
 data <- read.csv("day.csv", header=TRUE)
 
 # convert season variable to 4 binary variables
-winter <- data$season == 1
-spring <- data$season == 2
-summer <- data$season == 3
-autumn <- data$season == 4
+winter <- data$instant %% 365 > 122 & data$instant %% 365 < 243
+spring <- data$instant %% 365 < 61 | data$instant %% 365 > 304 | 
+  data$instant %% 365 > 152 & data$instant %% 365 < 213
 data <- cbind(data, winter)
 data <- cbind(data, spring)
-data <- cbind(data, summer)
-data <- cbind(data, autumn)
-
-# convert year and instant variables to continuous ratio variable
-data$day <- data$instant + 112
 
 # add day length
 data$daylength <- 0
@@ -79,6 +68,8 @@ for (J in 1:731)
     )
   data$daylength[J] <- D
 }
+
+data$workingday <- data$weekday < 5
 
 # add monthly gasoline price
 gasprice.per.month <- c(
@@ -101,29 +92,28 @@ rallies.and.protests <- c(
 data$rallyprotest <- data$instant %in% rallies.and.protests
 
 # remove all variables not present in model
-data <- subset(data, select=-c(instant, yr, dteday, season, weekday, mnth, cnt))
+data <- subset(data, select=-c(yr, dteday, season, weekday, mnth, cnt))
+scaled.data <- data.frame(scale(data))
 
 
 
 # perform conditional independence tests
 # - a small p-value is bad, as that indicates a dependence
-# - still need to convert these p-values to effect sizes
-results <- localTests(g, data, type="tetrads")
-results[results$p.value < 1e-20,]
-
-scaled.data <- data.frame(scale(data))
-summary(lm(scaled.data$autumn ~ scaled.data$day))
-
-t <- 35
-ggplot() + geom_line(aes(x=1:(731-t+1), y=rollmean(data$weathersit, k=t)))
-ggplot(data) + geom_point(aes(x=day, y=winter))
-summary(lm(data$gasprice ~ data$day))
+# - first column are partial correlation coefficients used as effect sizes
+results <- localTests(g, scaled.data, type="cis")
+top.results <- results[results$p.value < 1e-5,]
+top.results
+plotLocalTestResults(results)
 
 
-scaled.data <- data.frame(lapply(scaled.data, as.numeric))
+# fit data to SEM using lavaan package
+# create covariance matrix for multivariate Gaussian
 net <- toString(g,"lavaan")
 fit1 <- sem(net, scaled.data)
+summary(fit1)
 
-net <- model2network(toString(g,"bnlearn"))
-fit <- bn.fit( net, scaled.data, sample.nobs=nrow(data))
-fit
+ggplot(data) + geom_point(aes(x=instant, y=casual))
+pcor(subset(scaled.data, select=c(registered, holiday)))
+
+lavaanPlot(model = fit1, node_options = list(shape = "box", fontname = "Helvetica"), edge_options = list(color = "grey"), coefs = T)
+
