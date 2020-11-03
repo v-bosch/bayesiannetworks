@@ -1,5 +1,7 @@
 library(dagitty)
 library(lavaan)
+library(lavaanPlot)
+library(ppcor)
 
 # full Bayesian network is specified below
 g <- dagitty(paste('dag {',
@@ -7,35 +9,35 @@ g <- dagitty(paste('dag {',
   #            Variables             #
   ####################################                   
   # weather variables
-  'atemp [pos="-0.396,-0.445"]
-  casual [pos="-0.352,-0.207"]
-  daylength [pos="-0.411,-0.159"]
-  gasprice [pos="-0.416,-0.225"]
-  instant [pos="-0.314,-0.171"]
-  hum [pos="-0.426,-0.447"]',
-  # 'holiday [pos="-0.315,-0.260"]',
-  # rallyprotest [pos="-0.356,-0.129"]
-  'registered [pos="-0.352,-0.304"]',
-  'temp [pos="-0.406,-0.356"]
-  weatherlatent [latent,pos="-0.464,-0.300"]
-  weathersit [pos="-0.483,-0.295"]
-  windspeed [pos="-0.420,-0.397"]
-  warm [pos="-0.483,-0.251"]
-  workingday [pos="-0.317,-0.332"]',
+  'atemp [pos="-0.397,-0.269"]
+  casual [pos="-0.378,-0.263"]
+  daylength [pos="-0.397,-0.218"]
+  gasprice [pos="-0.380,-0.360"]
+  holiday [pos="-0.353,-0.284"]
+  hum [pos="-0.397,-0.313"]
+  instant [pos="-0.353,-0.326"]
+  rallyprotest [pos="-0.378,-0.217"]
+  registered [pos="-0.378,-0.304"]
+  temp [pos="-0.408,-0.250"]
+  warm [pos="-0.448,-0.271"]
+  weatherlatent [latent,pos="-0.425,-0.263"]
+  weathersit [pos="-0.425,-0.289"]
+  windspeed [pos="-0.409,-0.274"]
+  workingday [pos="-0.354,-0.237"]',
   
   ####################################
   #            Relations             #
   ####################################
   # weather relations
-  '{warm} -> {weatherlatent daylength gasprice}',
-  'instant -> gasprice',
-  'weatherlatent -> {hum windspeed temp weathersit}',
-  'daylength -> temp',
-  '{hum temp windspeed} -> atemp',
+  '{warm} -> {weatherlatent daylength gasprice}
+  instant -> gasprice
+  weatherlatent -> {hum windspeed temp weathersit}
+  daylength -> temp
+  {hum temp windspeed} -> atemp',
   
   # outcome relations
-  '{instant gasprice atemp hum} -> registered
-  {instant atemp workingday} -> casual
+  '{instant gasprice atemp hum holiday workingday daylength} -> registered
+  {instant atemp workingday holiday rallyprotest daylength} -> casual
 }'))
 plot(g)
 
@@ -95,7 +97,7 @@ rallies.and.protests <- c(
 data$rallyprotest <- data$instant %in% rallies.and.protests
 
 # remove all variables not present in model
-data <- subset(data, select=-c(yr, dteday, weekday, season, mnth, cnt, holiday, rallyprotest))
+data <- subset(data, select=-c(yr, dteday, weekday, season, mnth, cnt))
 scaled.data <- data.frame(scale(data))
 
 
@@ -118,7 +120,7 @@ summary(fit)
 
 # show SEM with coefficients
 lavaanPlot(
-    model=fit1,
+    model=fit,
     node_options=list(shape="box", fontname="Helvetica"),
     edge_options=list(color="grey"),
     coefs=TRUE
