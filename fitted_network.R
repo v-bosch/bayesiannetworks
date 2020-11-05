@@ -2,6 +2,7 @@ library(dagitty)
 library(lavaan)
 library(lavaanPlot)
 library(ppcor)
+library(ggplot2)
 
 # full Bayesian network is specified below
 g <- dagitty(paste('dag {',
@@ -9,36 +10,38 @@ g <- dagitty(paste('dag {',
   #            Variables             #
   ####################################                   
   # weather variables
-  'atemp [pos="-0.397,-0.269"]
-  casual [pos="-0.378,-0.263"]
-  daylength [pos="-0.397,-0.218"]
-  gasprice [pos="-0.380,-0.360"]
-  holiday [pos="-0.353,-0.284"]
-  hum [pos="-0.397,-0.313"]
-  instant [pos="-0.353,-0.326"]
-  rallyprotest [pos="-0.378,-0.217"]
-  registered [pos="-0.378,-0.304"]
-  temp [pos="-0.408,-0.250"]
-  warm [pos="-0.448,-0.271"]
-  weatherlatent [latent,pos="-0.425,-0.263"]
-  weathersit [pos="-0.425,-0.289"]
-  windspeed [pos="-0.409,-0.274"]
-  workingday [pos="-0.354,-0.237"]',
+  'atemp [pos="-0.428,-0.318"]
+  casual [pos="-0.412,-0.300"]
+  daylength [pos="-0.427,-0.346"]
+  gasprice [pos="-0.412,-0.363"]
+  holiday [pos="-0.386,-0.317"]
+  hum [pos="-0.440,-0.292"]
+  instant [pos="-0.385,-0.346"]
+  rallyprotest [pos="-0.412,-0.278"]
+  registered [pos="-0.412,-0.332"]
+  temp [pos="-0.439,-0.334"]
+  warm [pos="-0.448,-0.365"]
+  weathersit [pos="-0.428,-0.289"]
+  windspeed [pos="-0.447,-0.317"]
+  workingday [pos="-0.387,-0.290"]',
   
   ####################################
   #            Relations             #
   ####################################
   # weather relations
-  '{warm} -> {weatherlatent daylength gasprice}
-  instant -> gasprice
-  weatherlatent -> {hum windspeed temp weathersit}
-  daylength -> temp
-  {hum temp windspeed} -> atemp',
+  'warm -> {daylength}',
+  '{hum windspeed} <- weathersit',
+  'daylength -> temp',
+  'windspeed -> hum',
+  '{temp windspeed hum} -> atemp',
+  
+  # gasprice
+  '{warm instant} -> gasprice -> registered',
   
   # outcome relations
-  '{instant gasprice atemp hum holiday workingday daylength} -> registered
-  {instant atemp workingday holiday rallyprotest daylength} -> casual
-}'))
+  '{instant atemp workingday holiday weathersit rallyprotest daylength} -> casual',
+  '{instant atemp gasprice workingday holiday weathersit daylength} -> registered',
+'}'))
 plot(g)
 
 
@@ -98,14 +101,44 @@ data$rallyprotest <- data$instant %in% rallies.and.protests
 
 # remove all variables not present in model
 data <- subset(data, select=-c(yr, dteday, weekday, season, mnth, cnt))
-scaled.data <- data.frame(scale(data))
+scaled.data <- data.frame(scale(subset(data, select=-weathersit)))
+scaled.data$atemp[595] <- -scaled.data$atemp[595]
 
-
+# make weather situation ordinal in the data
+hour.data = read.csv("hour.csv", header=TRUE)
+prev.day <- "2011-01-01"
+day.weathersit <- NULL
+weathersit <- NULL
+for (I in 1:nrow(hour.data))
+{
+  if (hour.data$dteday[I] != prev.day | hour.data$instant[I] == nrow(hour.data))
+  {
+    if (sum(day.weathersit == 3 | day.weathersit == 4) > 2)
+    {
+      weathersit <- c(weathersit, 3)
+    } else if (sum(day.weathersit == 2) > 2)
+    {
+       weathersit <- c(weathersit, 2)
+    }
+    else
+    {
+      weathersit <- c(weathersit, 1)
+    }
+    # weathersit <- c(weathersit, min(max(day.weathersit), 3))
+    # weathersit <- c(weathersit, mean(day.weathersit))
+    day.weathersit <- NULL
+  }
+  day.weathersit <- c(day.weathersit, hour.data$weathersit[I])
+  prev.day <- hour.data$dteday[I]
+}
+# scaled.data$weathersit <- ordered(data$weathersit, levels=1:3)
+scaled.data$weathersit <- ordered(weathersit, levels=1:3)
 
 # perform conditional independence tests
 # - a small p-value is bad, as that indicates a dependence
 # - first column are partial correlation coefficients used as effect sizes
-results <- localTests(g, scaled.data, type="cis")
+M = lavCor(scaled.data)
+results <- localTests(g, type="cis", sample.cov=M, sample.nobs=731)
 top.results <- results[results$p.value < 1e-5,]
 top.results
 plotLocalTestResults(results)
@@ -114,8 +147,10 @@ plotLocalTestResults(results)
 
 # fit data to SEM using lavaan package
 # create covariance matrix for multivariate Gaussian model
-net <- toString(g,"lavaan")
-fit <- sem(net, scaled.data, estimator="WLSMV")
+net <- toString(g, "lavaan")
+fit <- sem(
+    net, sample.cov=M, sample.nobs=731
+)
 summary(fit)
 
 # show SEM with coefficients
@@ -125,3 +160,14 @@ lavaanPlot(
     edge_options=list(color="grey"),
     coefs=TRUE
 )
+
+I = "weathersit"
+J = "windspeed"
+ggplot() +
+    geom_point(aes(x=scaled.data[[I]], y=scaled.data[[J]])) +
+    xlab(I) +
+    ylab(J)
+pcor(subset(scaled.data, select=c(warm, weathersit)))
+
+ggplot(scaled.data) + geom_point(aes(x=warm, y=weathersit))
+lm(atemp ~ hum, scaled.data)
