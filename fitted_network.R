@@ -1,4 +1,5 @@
 library(dagitty)
+library(bnlearn)
 library(lavaan)
 library(lavaanPlot)
 library(ppcor)
@@ -101,6 +102,7 @@ data$rallyprotest <- data$instant %in% rallies.and.protests
 
 # remove all variables not present in model
 data <- subset(data, select=-c(yr, dteday, weekday, season, mnth, cnt))
+data <- data.frame(lapply(data, as.numeric))
 scaled.data <- data.frame(scale(subset(data, select=-weathersit)))
 scaled.data$atemp[595] <- -scaled.data$atemp[595]
 
@@ -113,12 +115,12 @@ for (I in 1:nrow(hour.data))
 {
   if (hour.data$dteday[I] != prev.day | hour.data$instant[I] == nrow(hour.data))
   {
-    if (sum(day.weathersit == 3 | day.weathersit == 4) > 2)
+    if (sum(day.weathersit == 3 | day.weathersit == 4) >= 3)
     {
       weathersit <- c(weathersit, 3)
-    } else if (sum(day.weathersit == 2) > 2)
+    } else if (sum(day.weathersit == 2 | day.weathersit == 3 | day.weathersit == 4) >= 3)
     {
-       weathersit <- c(weathersit, 2)
+      weathersit <- c(weathersit, 2)
     }
     else
     {
@@ -133,6 +135,7 @@ for (I in 1:nrow(hour.data))
 }
 # scaled.data$weathersit <- ordered(data$weathersit, levels=1:3)
 scaled.data$weathersit <- ordered(weathersit, levels=1:3)
+data$weathersit <- ordered(weathersit, levels=1:3)
 
 # perform conditional independence tests
 # - a small p-value is bad, as that indicates a dependence
@@ -141,7 +144,7 @@ M = lavCor(scaled.data)
 results <- localTests(g, type="cis", sample.cov=M, sample.nobs=731)
 top.results <- results[results$p.value < 1e-5,]
 top.results
-plotLocalTestResults(results)
+plotLocalTestResults(top.results)
 
 
 
@@ -171,3 +174,21 @@ pcor(subset(scaled.data, select=c(warm, weathersit)))
 
 ggplot(scaled.data) + geom_point(aes(x=warm, y=weathersit))
 lm(atemp ~ hum, scaled.data)
+
+
+lavPredict(fit, scaled.data[1,3:5])
+
+
+i <- 9
+j <- c("instant", "holiday", "workingday", "temp")
+
+cv <- fitted(fit)$cov
+coef <- solve(cv[j,j],cv[j,i])
+
+predictions <- data[1,j]%*% coef
+
+
+net <- model2network(toString(g, "bnlearn"))
+fit <- bn.fit(net,(data))
+
+predict(fit, node="registered", data=data[1,], method="bayes-lw")
