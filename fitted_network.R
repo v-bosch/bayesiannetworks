@@ -2,42 +2,40 @@ library(dagitty)
 library(bnlearn)
 library(lavaan)
 library(lavaanPlot)
-library(ppcor)
-library(ggplot2)
 library(pracma)
 
 # full Bayesian network is specified below
 g <- dagitty(paste('dag {',
-  ####################################
-  #            Variables             #
-  ####################################                   
-  # weather variables
-  'atemp [pos="-0.401,-0.333"]
-  casual [pos="-0.412,-0.304"]
-  daylength [pos="-0.422,-0.334"]
-  gasprice [pos="-0.421,-0.312"]
-  holiday [pos="-0.409,-0.291"]
-  hum [pos="-0.395,-0.319"]
-  instant [pos="-0.421,-0.291"]
-  rallyprotest [pos="-0.415,-0.291"]
-  registered [pos="-0.412,-0.321"]
-  temp [pos="-0.412,-0.334"]
-  warm [pos="-0.431,-0.303"]
-  weathersit [pos="-0.387,-0.302"]
-  windspeed [pos="-0.393,-0.333"]
-  workingday [pos="-0.400,-0.294"]',
+    ####################################
+    #            Variables             #
+    ####################################                   
+    # weather variables
+    'atemp [pos="-0.401,-0.333"]
+    casual [pos="-0.412,-0.304"]
+    daylength [pos="-0.422,-0.334"]
+    gasprice [pos="-0.421,-0.312"]
+    holiday [pos="-0.409,-0.291"]
+    hum [pos="-0.395,-0.319"]
+    instant [pos="-0.421,-0.291"]
+    rallyprotest [pos="-0.415,-0.291"]
+    registered [pos="-0.412,-0.321"]
+    temp [pos="-0.412,-0.334"]
+    season [pos="-0.431,-0.303"]
+    weathersit [pos="-0.387,-0.302"]
+    windspeed [pos="-0.393,-0.333"]
+    workingday [pos="-0.400,-0.294"]',
   
-  ####################################
-  #            Relations             #
-  ####################################
-  'warm -> daylength -> temp -> atemp
-  weathersit -> {windspeed -> hum} -> atemp
-  
-  {warm instant} -> gasprice
-  
-  {instant atemp workingday weathersit rallyprotest gasprice daylength holiday} -> casual
-  {instant atemp workingday weathersit gasprice daylength} -> registered
-}'))
+    ####################################
+    #            Relations             #
+    ####################################
+    'season -> daylength -> temp -> atemp
+    weathersit -> {windspeed -> hum} -> atemp
+    
+    {season instant} -> gasprice
+    
+    {instant atemp workingday weathersit gasprice daylength rallyprotest holiday} -> casual
+    {instant atemp workingday weathersit gasprice daylength} -> registered',
+'}'))
 plot(g)
 
 
@@ -49,7 +47,7 @@ day.starts <- hour.data$instant[!duplicated(hour.data$dteday)]
 
 data <- data.frame(
     instant=seq_along(day.starts),
-    warm=hour.data[day.starts, "season"] %% 4 > 1,
+    season=hour.data[day.starts, "season"] %% 4 > 1,
     holiday=hour.data[day.starts, "holiday"] == 1,
     workingday=hour.data[day.starts, "weekday"] %% 6 != 0,
     weathersit=ordered(1, levels=1:3),
@@ -64,17 +62,17 @@ data <- data.frame(
 day.intervals <- c(day.starts, nrow(hour.data) + 1)
 for (I in data$instant)
 {
-    day.data <- hour.data[day.intervals[I]:day.intervals[I + 1] - 1,]
+    day.data <- hour.data[day.intervals[I]:(day.intervals[I + 1] - 1),]
 
     if (sum(day.data$weathersit == 3 | day.data$weathersit == 4) >= 3)
     {
-      data$weathersit[I] <- 3
+        data$weathersit[I] <- 3
     } else if (sum(day.data$weathersit == 2 | day.data$weathersit == 3 | day.data$weathersit == 4) >= 3)
     {
-      data$weathersit[I] <- 2
+        data$weathersit[I] <- 2
     } else
     {
-      data$weathersit[I] <- 1
+        data$weathersit[I] <- 1
     }
     
     data[I, "hum"] <- mean(day.data$hum)
@@ -90,15 +88,15 @@ data$daylength <- -1
 L <- 38.8951  # latitude Washington D.C.
 for (I in data$instant) 
 {
-  P = asin(0.39795 * cos(0.2163108 + 2 * atan(0.9671396 * tan(.00860 * (I - 186)))))
+    P = asin(0.39795 * cos(0.2163108 + 2 * atan(0.9671396 * tan(.00860 * (I - 186)))))
   
-  D <- 24 - (24 / pi) * 
-    acos(
-      (sin(0.8333 * pi / 180) + sin(L * pi / 180) * sin(P))
-      / 
+    D <- 24 - (24 / pi) * 
+      acos(
+        (sin(0.8333 * pi / 180) + sin(L * pi / 180) * sin(P))
+          / 
         (cos(L * pi / 180) * cos(P))
-    )
-  data[I, "daylength"] <- D
+      )
+    data[I, "daylength"] <- D
 }
 
 # add weekly gasoline price
@@ -151,9 +149,8 @@ plotLocalTestResults(top.results, xlab="Partial correlation coeffcient (95% CI)"
 
 
 # fit data to SEM using lavaan package
-# create covariance matrix for multivariate Gaussian model
 net <- toString(g, "lavaan")
-fit <- sem(net, sample.cov=M, sample.nobs=731)
+fit <- sem(net, sample.cov=M, sample.nobs=nrow(data))
 summary(fit)
 
 # show SEM with coefficients
@@ -165,28 +162,31 @@ lavaanPlot(
 )
 
 
+
+# predict with SEM using bnlearn package
 net <- model2network(toString(g, "bnlearn"))
 fit <- bn.fit(net, data)
 
+# predict users for different values of workingday, holiday, and weathersit
 tbl <- expand.grid(workingday=c(1, 0), holiday=c(1, 0), weathersit=c(1, 2, 3))
 tbl$weathersit <- ordered(tbl$weathersit, levels=1:3)
 tbl$casual <- predict(fit, node="casual", data=tbl, method="bayes-lw")
 tbl$registered <- predict(fit, node="registered", data=tbl, method="bayes-lw")
 tbl
 
-tbl <- data.frame(instant=as.numeric(732:1096))
+# predict users a year into the future
+tbl <- data.frame(instant=as.numeric((nrow(data) + 1):(nrow(data) + 365)))
 tbl$casual <- predict(fit, node="casual", data=tbl, method="bayes-lw")
 tbl$registered <- predict(fit, node="registered", data=tbl, method="bayes-lw")
 tbl
 
-tbl <- data.frame(gasprice=linspace(3.11, 4, n=101))
-# gasprices$warm <- 1
-# gasprices$day <- 365
+# predict users for different gasprices
+tbl <- data.frame(gasprice=linspace(min(data$gasprice), max(data$gasprice), n=100))
 tbl$casual <- predict(fit, node="casual", data=tbl, method="bayes-lw")
 tbl$registered <- predict(fit, node="registered", data=tbl, method="bayes-lw")
 tbl
 
-tbl <- data.frame(rallyprotest=c(1, 0))
+tbl <- expand.grid(rallyprotest=c(1, 0))
 tbl$casual <- predict(fit, node="casual", data=tbl, method="bayes-lw")
 tbl$registered <- predict(fit, node="registered", data=tbl, method="bayes-lw")
 tbl
