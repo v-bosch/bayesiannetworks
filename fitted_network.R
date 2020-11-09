@@ -73,6 +73,10 @@ data <- data.frame(
     workingday=hour.data[day.starts, "weekday"] %% 6 != 0,
     weathersit=ordered(1, levels=1:3),
     daylength=daylength(seq_along(day.starts)),
+    rallyprotest=seq_along(day.starts) %in% c(
+            274, 288, 289, 313, 314, 315, 316, 317, 318, 319, 320, 321,
+            322, 323, 324, 325, 326, 327, 376, 416, 449, 575, 673, 687
+        ),
     gasprice=-1,
     hum=-1,
     windspeed=-1,
@@ -82,6 +86,7 @@ data <- data.frame(
     registered=-1
 )
 
+# aggregate over hours to get daily variables
 day.intervals <- c(day.starts, nrow(hour.data) + 1)
 for (I in data$instant)
 {
@@ -106,7 +111,6 @@ for (I in data$instant)
     data[I, "registered"] <- sum(day.data$registered)
 }
 
-
 # add weekly gasoline price
 gasprice.per.week <- c(
     3.114, 3.129, 3.141, 3.164, 3.172, 3.165, 3.175, 3.181, 3.209, 3.37, 3.519,
@@ -125,13 +129,6 @@ for (I in 1:(length(week.starts) - 1))
 {
     data[week.starts[I]:(week.starts[I + 1] - 1), "gasprice"] <- gasprice.per.week[I]
 }
-
-# add rallies and protest marches
-rallies.and.protests <- c(
-    274, 288, 289, 313, 314, 315, 316, 317, 318, 319, 320, 321,
-    322, 323, 324, 325, 326, 327, 376, 416, 449, 575, 673, 687
-)
-data$rallyprotest <- data$instant %in% rallies.and.protests
 
 # scale all variables to z-scores
 numeric.data <- data.frame(lapply(subset(data, select=-weathersit), as.numeric))
@@ -173,14 +170,6 @@ lavaanPlot(
 # predict with SEM using bnlearn package
 net <- model2network(toString(g, "bnlearn"))
 fit <- bn.fit(net, data)
-
-# predict users with available dataset
-tbl <- subset(data, select=-c(casual, registered))
-tbl$casual <- predict(fit, node="casual", data=tbl, method="bayes-lw")
-tbl$registered <- predict(fit, node="casual", data=tbl, method="bayes-lw")
-tbl$realcasual <- data$casual
-tbl$realregistered <- data$registered
-tbl
 
 # predict users for different values of workingday, holiday, and weathersit
 tbl <- expand.grid(workingday=c(1, 0), holiday=c(1, 0), weathersit=c(1, 2, 3))
@@ -232,7 +221,6 @@ year3 <- data.frame(
     workingday=data[4:368, "workingday"],
     daylength=daylength(732:1096),
     gasprice=-1,
-    weathersit=data[1:365, "weathersit"],
     hum=data[1:365, "hum"],
     windspeed=data[1:365, "windspeed"],
     temp=data[1:365, "temp"],
@@ -250,22 +238,23 @@ for (I in 1:(length(week.starts) - 1))
 {
   year3[week.starts[I]:(week.starts[I + 1] - 1), "gasprice"] <- gasprice.per.week[I]
 }
-numeric.year3 <- data.frame(lapply(subset(year3, select=-weathersit), as.numeric))
-year3 <- cbind(numeric.year3, weathersit=year3$weathersit)
+numeric.year3 <- data.frame(lapply(year3, as.numeric))
+year3$weathersit <-data[1:365, "weathersit"]
 
+years <- data.frame(instant=1:1096)
+years$casual <- predict(fit, node="casual", data=rbind(subset(data, select=-c(casual, registered)), year3), method="bayes-lw")
+years$registered <- predict(fit, node="registered", data=rbind(subset(data, select=-c(casual, registered)), year3), method="bayes-lw")
 
-year3$casual <- predict(fit, node="casual", data=year3, method="bayes-lw")
-year3$registered <- predict(fit, node="registered", data=year3, method="bayes-lw")
-year3
-
-ggplot() +
-    geom_point(aes(x=1:1096, y=c(data$casual, year3$casual))) +
-    xlab("days") + ylab("Number of casual users")
-ggplot() +
-    geom_point(aes(x=1:1096, y=c(data$registered, year3$registered))) +
-    xlab("days") + ylab("Number of registered users")
-ggplot() +
-    geom_point(aes(x=1:1096, y=c(data$casual + data$registered, year3$casual + year3$registered))) +
+ggplot(years) +
+   geom_point(aes(x=instant, y=casual)) +
+   xlab("days") + ylab("Number of casual users")
+ggplot(years) +
+   geom_point(aes(x=instant, y=registered)) +
+   xlab("days") + ylab("Number of registered users")
+ggplot(years) +
+   geom_point(aes(x=instant, y=casual + registered)) +
+   xlab("days") + ylab("Total number of users")
+ggplot(data) +
+    geom_point(aes(x=instant, y=casual + registered)) +
     xlab("days") + ylab("Total number of users")
-
                                         
