@@ -192,8 +192,14 @@ tbl$casual <- predict(fit, node="casual", data=tbl, method="bayes-lw")
 tbl$registered <- predict(fit, node="registered", data=tbl, method="bayes-lw")
 tbl
 
+# predict users for different day lengths
+tbl <- data.frame(daylength=linspace(min(data$daylength), max(data$daylength), n=100))
+tbl$casual <- predict(fit, node="casual", data=tbl, method="bayes-lw")
+tbl$registered <- predict(fit, node="registered", data=tbl, method="bayes-lw")
+tbl
+
 # predict registered users for different gas prices
-tbl <- data.frame(gasprice=linspace(3, 4, n=101))
+tbl <- data.frame(gasprice=linspace(3, 4, n=100))
 tbl$registered <- predict(fit, node="registered", data=tbl, method="bayes-lw")
 tbl
 
