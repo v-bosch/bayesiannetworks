@@ -10,11 +10,16 @@ output:
 Let's start with importing the necessary libraries.
 
 ```{r}
-install.packages("bnlearn")
+#if (!requireNamespace("BiocManager", quietly = TRUE))
+#  install.packages("BiocManager")
+#BiocManager::install("RBGL")
+#install.packages("bnlearn")
+#intall.packages("SID")
 library(bnlearn)
 library(dagitty)
 library(ggplot2)
 library(ggpubr)
+library(SID)
 ```
 
 Let's now load the data from storage and determine the indices at which each day starts.
@@ -155,11 +160,41 @@ mse <- function(g)
   years$casual <- predict(fit, node="casual", data=years, method="bayes-lw")
   years$registered <- predict(fit, node="registered", data=years, method="bayes-lw")
   years.list <<- append(years.list, list(years))
-  MSE <- 0.5 * sum((data$casual + data$registered - years$casual - years$registered)^2)
+  graphs <<- append(graphs, list(g))
+  MSE <- mean((data$casual + data$registered - years$casual - years$registered)^2)
   return(MSE)
 }
 
+graphsDists <- function(titles)
+{
+  ntitles <- length(titles)
+  dists <- list(
+    data.frame(matrix(
+      ncol=ntitles,
+      nrow=ntitles,
+      dimnames=list(titles, titles)
+    )),
+    data.frame(matrix(
+      ncol=ntitles,
+      nrow=ntitles,
+      dimnames=list(titles, titles)
+    ))
+  )
+  
+  for (i in 1:ntitles)
+  {
+    for (j in 1:ntitles)
+    {
+      dists[[1]][i,j] <- structIntervDist(amat(graphs[[i]]), amat(graphs[[j]]))$sid
+      dists[[2]][i,j] <- hammingDist(amat(graphs[[i]]), amat(graphs[[j]]))
+    }
+  }
+  
+  return(dists)
+}
+
 years.list <- list()
+graphs <- list()
 
 plot.preds <- function(i, title)
 {
@@ -181,7 +216,19 @@ We are finally ready to start trying out structure learning algorithms.
 First, we will try the hill climbing algorthm which learns structure based on a score.
 
 ```{r}
-g <- hc(scaled.data, score="bic-cg") #, k=1)
+g <- hc(scaled.data, score="aic-cg") #, k=1)
+
+write("\nArcs in the DAG:", stdout())
+write(length(arcs(g)) / 2, stdout())
+
+write("MSE on the total number of users:", stdout())
+write(mse(g), stdout())
+
+plot(g)
+```
+
+```{r}
+g <- hc(scaled.data, score="bic-cg")
 
 write("\nArcs in the DAG:", stdout())
 write(length(arcs(g)) / 2, stdout())
@@ -223,17 +270,12 @@ plot(g)
 Next, we will consider a variant of the PC algorithm.
 
 ```{r}
-g <- pc.stable(scaled.data, test="mi-cg", alpha=0.005)
+# g <- pc.stable(scaled.data, test="mi-cg", alpha=0.005)
 
-write("\nArcs in the DAG:", stdout())
-write(length(arcs(g)) / 2, stdout())
+# write("\nArcs in the DAG:", stdout())
+# write(length(arcs(g)) / 2, stdout())
 
-write("MSE on the total number of users:", stdout())
-write(mse(g), stdout())
-
-print.preds()
-
-plot(g)
+# plot(g)
 ```
 
 ### Manual
@@ -241,7 +283,7 @@ Finally, we can compare the structure learning algorithms to our manual effort.
 
 ```{r}
 # full Bayesian network is specified below using dagitty package
-g <- dagitty(paste('dag {',
+manual.g <- dagitty(paste('dag {',
     ####################################
     #            Variables             #
     ####################################
@@ -281,15 +323,15 @@ g <- dagitty(paste('dag {',
     '{day atemp workingday weathersit gasprice daylength holiday rallyprotest} -> casual
     {day atemp workingday weathersit gasprice daylength} -> registered',
 '}'))
-g <- model2network(toString(g, "bnlearn"))
+manual.g <- model2network(toString(manual.g, "bnlearn"))
 
 write("\nArcs in the DAG:", stdout())
-write(length(arcs(g)) / 2, stdout())
+write(length(arcs(manual.g)) / 2, stdout())
 
 write("MSE on the total number of users:", stdout())
-write(mse(g), stdout())
+write(mse(manual.g), stdout())
 
-plot(g)
+plot(manual.g)
 ```
 
 ### Inspect the predictions of the total number of users
@@ -300,4 +342,9 @@ plot.preds(3, "loglik-cg")
 plot.preds(4, "pred-loglik-cg")
 plot.preds(5, "manual")
 ```
-
+```{r}
+dists <- graphsDists(c("aic-cg","bic-cg","loglik-cg","pred-loglik-cg","manual"))
+write("Structural Intervention Distance followed by Structural Hamming Distance:", stdout())
+print(dists[[1]])
+print(dists[[2]])
+```
