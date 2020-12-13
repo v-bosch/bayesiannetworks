@@ -13,8 +13,10 @@ Let's start with importing the necessary libraries.
 #if (!requireNamespace("BiocManager", quietly = TRUE))
 #  install.packages("BiocManager")
 #BiocManager::install("RBGL")
+#install.packages("birankr")
 #install.packages("bnlearn")
 #intall.packages("SID")
+library(birankr)
 library(bnlearn)
 library(dagitty)
 library(ggplot2)
@@ -152,7 +154,7 @@ scaled.data$atemp[595] <- -scaled.data$atemp[595]  # reverse outlier
 ```
 
 ```{r include=FALSE}
-mse <- function(g)
+save.network <- function(g)
 {
   # predict with SEM using bnlearn package
   fit <- bn.fit(g, data)  # use non-scaled version of data for prediction
@@ -161,8 +163,51 @@ mse <- function(g)
   years$registered <- predict(fit, node="registered", data=years, method="bayes-lw")
   years.list <<- append(years.list, list(years))
   graphs <<- append(graphs, list(g))
-  MSE <- mean((data$casual + data$registered - years$casual - years$registered)^2)
-  return(MSE)
+}
+
+plot.preds <- function(i, title)
+{
+  ggarrange(
+    ggplot(data) +
+      geom_line(aes(x=day, y=casual)) +
+      geom_line(aes(x=day, y=casual + registered)) +
+      geom_ribbon(aes(x=day, ymin=0, ymax=casual), fill="red", alpha=0.5) +
+      geom_ribbon(aes(x=day, ymin=casual, ymax=casual + registered), fill="blue", alpha=0.5) +
+      ylim(-600, max(data$casual + data$registered)) +
+      xlab("days") + ylab("True total number of users"),
+    ggplot(years.list[[i]]) +
+      geom_line(aes(x=day, y=casual)) +
+      geom_line(aes(x=day, y=casual + registered)) +
+      geom_ribbon(aes(x=day, ymin=0, ymax=casual), fill="red", alpha=0.5) +
+      geom_ribbon(aes(x=day, ymin=casual, ymax=casual + registered), fill="blue", alpha=0.5) +
+      ylim(-600, max(data$casual + data$registered)) +
+      ggtitle(title) + xlab("days") + ylab("Predicted total number of users"),
+    nrow=2
+  )
+}
+
+arcs_mses <- function(titles)
+{
+  ntitles <- length(titles)
+  metrics <- data.frame(matrix(
+    ncol=ntitles,
+    nrow=4,
+    dimnames=list(c("nr.arcs", "mse.casual", "mse.registered", "mse.total"), titles)
+  ))
+  
+  for (i in 1:ntitles)
+  {
+    nr.arcs <- length(arcs(graphs[[i]])) / 2
+    mse.casual <- mean((data$casual - years.list[[i]]$casual)^2)
+    mse.registered <- mean((data$registered - years.list[[i]]$registered)^2)
+    mse.total <- mean((
+      (data$casual + data$registered) - 
+      (years.list[[i]]$casual + years.list[[i]]$registered)
+    )^2)
+    metrics[,i] <- c(nr.arcs, mse.casual, mse.registered, mse.total)
+  }
+  
+  return(metrics)
 }
 
 graphsDists <- function(titles)
@@ -193,22 +238,27 @@ graphsDists <- function(titles)
   return(dists)
 }
 
+graphsPageRanks <- function(titles)
+{
+  ntitles <- length(titles)
+  pageRanks <- data.frame(matrix(
+    ncol=ntitles,
+    nrow=length(data),
+    dimnames=list(colnames(data), titles)
+  ))
+  
+  for (i in 1:ntitles)
+  {
+    graphPageRanks <- pagerank(data.frame(arcs(graphs[[i]])), is_bipartite=FALSE)
+    graphPageRanks <- graphPageRanks[order(match(graphPageRanks$from, colnames(data))),]
+    pageRanks[,i] <- graphPageRanks$rank
+  }
+  
+  return(pageRanks)
+}
+
 years.list <- list()
 graphs <- list()
-
-plot.preds <- function(i, title)
-{
-  ggarrange(
-    ggplot(data) +
-      geom_point(aes(x=day, y=casual + registered)) +
-      xlab("days") + ylab("True total number of users"),
-    ggplot(years.list[[i]]) +
-      geom_point(aes(x=day, y=casual + registered)) +
-      ggtitle(title) +
-      xlab("days") + ylab("Predicted total number of users"),
-    nrow=2
-  )
-}
 ```
 
 ### Hill Climbing
@@ -217,37 +267,19 @@ First, we will try the hill climbing algorthm which learns structure based on a 
 
 ```{r}
 g <- hc(scaled.data, score="aic-cg") #, k=1)
-
-write("\nArcs in the DAG:", stdout())
-write(length(arcs(g)) / 2, stdout())
-
-write("MSE on the total number of users:", stdout())
-write(mse(g), stdout())
-
+save.network(g)
 plot(g)
 ```
 
 ```{r}
 g <- hc(scaled.data, score="bic-cg")
-
-write("\nArcs in the DAG:", stdout())
-write(length(arcs(g)) / 2, stdout())
-
-write("MSE on the total number of users:", stdout())
-write(mse(g), stdout())
-
+save.network(g)
 plot(g)
 ```
 
 ```{r}
 g <- hc(scaled.data, score="loglik-cg")
-
-write("\nArcs in the DAG:", stdout())
-write(length(arcs(g)) / 2, stdout())
-
-write("MSE on the total number of users:", stdout())
-write(mse(g), stdout())
-
+save.network(g)
 plot(g)
 ```
 ```{r}
@@ -256,13 +288,7 @@ prop <- 0.8
 scaled.data80 <- scaled.data100[1:585,]
 scaled.data20 <- scaled.data100[586:731,]
 g <- hc(scaled.data80, score="pred-loglik-cg", newdata=scaled.data20)
-
-write("\nArcs in the DAG:", stdout())
-write(length(arcs(g)) / 2, stdout())
-
-write("MSE on the total number of users:", stdout())
-write(mse(g), stdout())
-
+save.network(g)
 plot(g)
 ```
 
@@ -324,13 +350,7 @@ manual.g <- dagitty(paste('dag {',
     {day atemp workingday weathersit gasprice daylength} -> registered',
 '}'))
 manual.g <- model2network(toString(manual.g, "bnlearn"))
-
-write("\nArcs in the DAG:", stdout())
-write(length(arcs(manual.g)) / 2, stdout())
-
-write("MSE on the total number of users:", stdout())
-write(mse(manual.g), stdout())
-
+save.network(manual.g)
 plot(manual.g)
 ```
 
@@ -342,8 +362,18 @@ plot.preds(3, "loglik-cg")
 plot.preds(4, "pred-loglik-cg")
 plot.preds(5, "manual")
 ```
+### Inspect the evaluation metrics
 ```{r}
-dists <- graphsDists(c("aic-cg","bic-cg","loglik-cg","pred-loglik-cg","manual"))
+titles <- c("aic-cg","bic-cg","loglik-cg","pred-loglik-cg","manual")
+arcs.mses <- arcs_mses(titles)
+print(arcs.mses)
+```
+```{r}
+pageRanks <- graphsPageRanks(titles)
+print(pageRanks)
+```
+```{r}
+dists <- graphsDists(titles)
 write("Structural Intervention Distance followed by Structural Hamming Distance:", stdout())
 print(dists[[1]])
 print(dists[[2]])
