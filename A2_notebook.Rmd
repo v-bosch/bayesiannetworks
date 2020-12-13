@@ -151,6 +151,13 @@ scaled.data <- data.frame(scale(numeric.data))
 data <- cbind(numeric.data, weathersit=data$weathersit)
 scaled.data <- cbind(scaled.data, weathersit=data$weathersit)
 scaled.data$atemp[595] <- -scaled.data$atemp[595]  # reverse outlier
+factor.data <- cbind(
+  subset(scaled.data, select=-c(season, holiday, workingday, rallyprotest)),
+  season=as.factor(data$season),
+  holiday=as.factor(data$holiday),
+  workingday=as.factor(data$workingday),
+  rallyprotest=as.factor(data$rallyprotest)
+)
 ```
 
 ```{r include=FALSE}
@@ -250,8 +257,8 @@ graphsPageRanks <- function(titles)
   for (i in 1:ntitles)
   {
     graphPageRanks <- pagerank(data.frame(arcs(graphs[[i]])), is_bipartite=FALSE)
-    graphPageRanks <- graphPageRanks[order(match(graphPageRanks$from, colnames(data))),]
-    pageRanks[,i] <- graphPageRanks$rank
+    orderPageRanks <- order(match(colnames(data), graphPageRanks$from))
+    pageRanks[orderPageRanks,i] <- graphPageRanks$rank
   }
   
   return(pageRanks)
@@ -266,28 +273,31 @@ We are finally ready to start trying out structure learning algorithms.
 First, we will try the hill climbing algorthm which learns structure based on a score.
 
 ```{r}
-g <- hc(scaled.data, score="aic-cg") #, k=1)
+g <- hc(factor.data, score="aic-cg") #, k=1)
 save.network(g)
 plot(g)
 ```
 
 ```{r}
-g <- hc(scaled.data, score="bic-cg")
+g <- hc(factor.data, score="bic-cg")
 save.network(g)
 plot(g)
 ```
 
 ```{r}
-g <- hc(scaled.data, score="loglik-cg")
+g <- hc(factor.data, score="loglik-cg")
 save.network(g)
 plot(g)
 ```
 ```{r}
-scaled.data100 <- sample(scaled.data)
 prop <- 0.8
-scaled.data80 <- scaled.data100[1:585,]
-scaled.data20 <- scaled.data100[586:731,]
-g <- hc(scaled.data80, score="pred-loglik-cg", newdata=scaled.data20)
+cut <- nrow(data) %/% (1 / prop) + 1
+
+factor.data100 <- factor.data[sample(nrow(data)),]
+factor.data.prop <- factor.data100[1:cut,]
+factor.data.not.prop <- factor.data100[(cut + 1):nrow(data),]
+
+g <- hc(factor.data.prop, score="pred-loglik-cg", newdata=factor.data.not.prop)
 save.network(g)
 plot(g)
 ```
