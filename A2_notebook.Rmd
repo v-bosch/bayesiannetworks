@@ -161,20 +161,39 @@ factor.data <- cbind(
 ```
 
 ```{r include=FALSE}
-save.network <- function(g)
+run.networks <- function(n.iters, pred, alg, ...)
 {
-  # predict with SEM using bnlearn package
-  fit <- bn.fit(g, data)  # use non-scaled version of data for prediction
-  years <- subset(data, select=-c(casual, registered))
-  years$casual <- predict(fit, node="casual", data=years, method="bayes-lw")
-  years$registered <- predict(fit, node="registered", data=years, method="bayes-lw")
-  years.list <<- append(years.list, list(years))
-  graphs <<- append(graphs, list(g))
+  graphs <<- append(graphs, list(vector("list", n.iters)))
+  if (pred)
+  {
+    years.list <<- append(years.list, list(vector("list", n.iters)))
+  }
+  
+  for (i in 1:n.iters)
+  {
+    g <- alg(...)
+    save.network(g, i, pred)
+  }
 }
 
-plot.preds <- function(i, title)
+save.network <- function(g, i, pred)
 {
-  ggarrange(
+  graphs[[length(graphs)]][[i]] <<- g
+  
+  if (pred)
+  {
+    # predict with SEM using bnlearn package
+    fit <- bn.fit(g, data)  # use non-scaled numeric version of data for prediction
+    years <- subset(data, select=-c(casual, registered))
+    years$casual <- predict(fit, node="casual", data=years, method="bayes-lw")
+    years$registered <- predict(fit, node="registered", data=years, method="bayes-lw")
+    years.list[[length(graphs)]][[i]] <<- years
+  }
+}
+
+plot.preds <- function(i, j, title)
+{
+  return(ggarrange(
     ggplot(data) +
       geom_line(aes(x=day, y=casual)) +
       geom_line(aes(x=day, y=casual + registered)) +
@@ -182,7 +201,7 @@ plot.preds <- function(i, title)
       geom_ribbon(aes(x=day, ymin=casual, ymax=casual + registered), fill="blue", alpha=0.5) +
       ylim(-600, max(data$casual + data$registered)) +
       xlab("days") + ylab("True total number of users"),
-    ggplot(years.list[[i]]) +
+    ggplot(years.list[[i]][[j]]) +
       geom_line(aes(x=day, y=casual)) +
       geom_line(aes(x=day, y=casual + registered)) +
       geom_ribbon(aes(x=day, ymin=0, ymax=casual), fill="red", alpha=0.5) +
@@ -190,132 +209,117 @@ plot.preds <- function(i, title)
       ylim(-600, max(data$casual + data$registered)) +
       ggtitle(title) + xlab("days") + ylab("Predicted total number of users"),
     nrow=2
-  )
+  ))
 }
 
-arcs_mses <- function(titles)
+graphsMetrics <- function(titles)
 {
   ntitles <- length(titles)
   metrics <- data.frame(matrix(
+    c(rep(0, len=5*ntitles), rep(Inf, len=ntitles)),
+    byrow=TRUE,
+    nrow=6,
     ncol=ntitles,
-    nrow=4,
-    dimnames=list(c("nr.arcs", "mse.casual", "mse.registered", "mse.total"), titles)
+    dimnames=list(c("arcs", "mse.cas", "mse.reg", "mse.tot", "bestMSEidx", "0"), titles)
   ))
   
   for (i in 1:ntitles)
   {
-    nr.arcs <- length(arcs(graphs[[i]])) / 2
-    mse.casual <- mean((data$casual - years.list[[i]]$casual)^2)
-    mse.registered <- mean((data$registered - years.list[[i]]$registered)^2)
-    mse.total <- mean((
-      (data$casual + data$registered) - 
-      (years.list[[i]]$casual + years.list[[i]]$registered)
-    )^2)
-    metrics[,i] <- c(nr.arcs, mse.casual, mse.registered, mse.total)
+    for (j in 1:length(years.list[[i]]))
+    {
+      graph <- graphs[[i]][[j]]
+      yrs <- years.list[[i]][[j]]
+      arcs.mses <- c(
+        length(arcs(graph)) / 2,
+        mean((data$casual - yrs$casual)^2),
+        mean((data$registered - yrs$registered)^2),
+        mean(((data$casual + data$registered) - (yrs$casual + yrs$registered))^2)
+      )
+      metrics[1:4,i] <- metrics[1:4,i] + (arcs.mses - metrics[1:4,i]) / j
+      
+      if (arcs.mses[4] < metrics[6,i])
+      {
+        metrics[5,i] <- j
+        metrics[6,i] <- arcs.mses[4]
+      }
+    }
   }
   
-  return(metrics)
+  return(metrics[1:5,])
 }
 
 graphsDists <- function(titles)
 {
   ntitles <- length(titles)
-  dists <- list(
-    data.frame(matrix(
-      ncol=ntitles,
-      nrow=ntitles,
-      dimnames=list(titles, titles)
-    )),
-    data.frame(matrix(
-      ncol=ntitles,
-      nrow=ntitles,
-      dimnames=list(titles, titles)
-    ))
-  )
+  dists <- data.frame(matrix(
+    c(rep(0, len=4*ntitles), rep(Inf, len=2*ntitles)),
+    byrow=TRUE,
+    nrow=6,
+    ncol=ntitles,
+    dimnames=list(c("SID", "SHD", "bestSIDidx", "bestSHDidx", "0", "1"), titles)
+  ))
   
+  true.graph <- graphs[[1]][[1]]
   for (i in 1:ntitles)
   {
-    for (j in 1:ntitles)
+    for (j in 1:length(graphs[[i+1]]))
     {
-      dists[[1]][i,j] <- structIntervDist(amat(graphs[[i]]), amat(graphs[[j]]))$sid
-      dists[[2]][i,j] <- hammingDist(amat(graphs[[i]]), amat(graphs[[j]]))
+      learned.graph <- graphs[[i+1]][[j]]
+      sid.shd <- c(
+        structIntervDist(amat(true.graph), amat(learned.graph))$sid,
+        hammingDist(amat(true.graph), amat(learned.graph))
+      )
+      dists[1:2,i] <- dists[1:2,i] + (sid.shd - dists[1:2,i]) / j
+      
+      if (sid.shd[1] < dists[5,i])
+      {
+        dists[3,i] <- j
+        dists[5,i] <- sid.shd[1]
+      }
+      if (sid.shd[2] < dists[6,i])
+      {
+        dists[4,i] <- j
+        dists[6,i] <- sid.shd[2]
+      }
     }
   }
   
-  return(dists)
+  return(dists[1:4,])
 }
 
 graphsPageRanks <- function(titles)
 {
   ntitles <- length(titles)
   pageRanks <- data.frame(matrix(
+    rep(0, len=ncol(data)*ntitles),
+    nrow=ncol(data),
     ncol=ntitles,
-    nrow=length(data),
     dimnames=list(colnames(data), titles)
   ))
   
   for (i in 1:ntitles)
   {
-    graphPageRanks <- pagerank(data.frame(arcs(graphs[[i]])), is_bipartite=FALSE)
-    orderPageRanks <- order(match(colnames(data), graphPageRanks$from))
-    pageRanks[orderPageRanks,i] <- graphPageRanks$rank
+    for (j in 1:length(graphs[[i]]))
+    {
+      graph <- graphs[[i]][[j]]
+      gPageRanks <- pagerank(data.frame(arcs(graph)), is_bipartite=FALSE)
+      perm <- order(match(colnames(data), gPageRanks$from))[1:nrow(gPageRanks)]
+      
+      pageRanks[perm,i] <- pageRanks[perm,i] + (gPageRanks$rank - pageRanks[perm,i]) / j
+    }
   }
   
   return(pageRanks)
 }
 
-years.list <- list()
-graphs <- list()
-```
-
-### Hill Climbing
-We are finally ready to start trying out structure learning algorithms.
-First, we will try the hill climbing algorthm which learns structure based on a score.
-
-```{r}
-g <- hc(factor.data, score="aic-cg") #, k=1)
-save.network(g)
-plot(g)
-```
-
-```{r}
-g <- hc(factor.data, score="bic-cg")
-save.network(g)
-plot(g)
-```
-
-```{r}
-g <- hc(factor.data, score="loglik-cg")
-save.network(g)
-plot(g)
-```
-```{r}
-prop <- 0.8
-cut <- nrow(data) %/% (1 / prop) + 1
-
-factor.data100 <- factor.data[sample(nrow(data)),]
-factor.data.prop <- factor.data100[1:cut,]
-factor.data.not.prop <- factor.data100[(cut + 1):nrow(data),]
-
-g <- hc(factor.data.prop, score="pred-loglik-cg", newdata=factor.data.not.prop)
-save.network(g)
-plot(g)
-```
-
-### PC
-Next, we will consider a variant of the PC algorithm.
-
-```{r}
-# g <- pc.stable(scaled.data, test="mi-cg", alpha=0.005)
-
-# write("\nArcs in the DAG:", stdout())
-# write(length(arcs(g)) / 2, stdout())
-
-# plot(g)
+# initialize lists that will hold graphs, respectively predictions
+graphs <- list(vector("list", 1))
+years.list <- list(vector("list", 1))
 ```
 
 ### Manual
-Finally, we can compare the structure learning algorithms to our manual effort.
+First, we initialize the manually constructed network to compare the
+automatically constructed networks to.
 
 ```{r}
 # full Bayesian network is specified below using dagitty package
@@ -360,31 +364,84 @@ manual.g <- dagitty(paste('dag {',
     {day atemp workingday weathersit gasprice daylength} -> registered',
 '}'))
 manual.g <- model2network(toString(manual.g, "bnlearn"))
-save.network(manual.g)
-plot(manual.g)
+
+# save network to lists and plot the network
+save.network(manual.g, 1, pred=TRUE)
+plot(manual.g, main="Manually constructed network")
 ```
 
-### Inspect the predictions of the total number of users
+### Hill Climbing
+We are finally ready to start trying out structure learning algorithms.
+First, we will try the hill climbing algorithm which learns structure based on a score.
+
 ```{r}
-plot.preds(1, "aic-cg")
-plot.preds(2, "bic-cg")
-plot.preds(3, "loglik-cg")
-plot.preds(4, "pred-loglik-cg")
-plot.preds(5, "manual")
+# set scores that will be used and initialize list that will hold predictions
+scores <- c("aic-cg", "bic-cg", "loglik-cg", "pred-loglik-cg")
+
+# initialize data for pred-loglik-cg scoring function
+set.seed(2020)
+prop <- 0.8
+cut <- nrow(data) %/% (1 / prop) + 1
+
+factor.data100 <- factor.data[sample(nrow(data)),]
+factor.data80 <- factor.data100[1:cut,]
+factor.data20 <- factor.data100[(cut + 1):nrow(data),]
+
+# run all algorithm variants
+n.iters = 10
+run.networks(n.iters, TRUE, hc, factor.data, score=scores[1])
+run.networks(n.iters, TRUE, hc, factor.data, score=scores[2])
+run.networks(n.iters, TRUE, hc, factor.data, score=scores[3])
+run.networks(n.iters, TRUE, hc, factor.data80, score=scores[4], newdata=factor.data20)
+
+# compute and show the metrics
+metrics <- graphsMetrics(c("manual", scores)); print(metrics)
+dists <- graphsDists(scores); print(dists)
+pageRanks <- graphsPageRanks(c("manual", scores)); print(pageRanks)
 ```
-### Inspect the evaluation metrics
+
 ```{r}
-titles <- c("aic-cg","bic-cg","loglik-cg","pred-loglik-cg","manual")
-arcs.mses <- arcs_mses(titles)
-print(arcs.mses)
+for (i in 1:length(scores))
+{
+  bestIdx <- dists["bestSIDidx",i]
+  plot(graphs[[i]][[bestIdx]], main=sprintf("Best %s network", scores[i]))
+}
 ```
 ```{r}
-pageRanks <- graphsPageRanks(titles)
-print(pageRanks)
+for (i in 1:length(c("manual", scores)))
+{
+  bestIdx <- metrics["bestMSEidx",i]
+  title <- sprintf("Best %s predictions MSE=%.0f",
+    c("manual", scores)[i],
+    metrics["mse.tot", i]
+  )
+  plot(plot.preds(i, bestIdx, title))
+}
 ```
+
+### PC
+Next, we will consider a variant of the PC algorithm.
+
 ```{r}
-dists <- graphsDists(titles)
-write("Structural Intervention Distance followed by Structural Hamming Distance:", stdout())
-print(dists[[1]])
-print(dists[[2]])
+graphs <- graphs[1]
+alphas = c(0.005, 0.01)
+
+# run all algorithm variants
+n.iters = 10
+run.networks(n.iters, FALSE, pc.stable, factor.data, alpha=alphas[1])
+run.networks(n.iters, FALSE, pc.stable, factor.data, alpha=alphas[2])
+
+# compute and show the metrics
+alpha.titles = paste0("alpha=", alphas)
+dists <- graphsDists(alpha.titles); print(dists)
+pageRanks <- graphsPageRanks(c("manual", alpha.titles)); print(pageRanks)
 ```
+
+```{r}
+for (i in 1:length(alphas))
+{
+  bestIdx <- dists["bestSIDidx",i]
+  plot(graphs[[i]][[bestIdx]], main=sprintf("Best alpha=%s network", alphas[i]))
+}
+```
+
