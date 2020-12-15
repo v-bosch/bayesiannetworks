@@ -375,7 +375,9 @@ We are finally ready to start trying out structure learning algorithms.
 First, we will try the hill climbing algorithm which learns structure based on a score.
 
 ```{r}
-# set scores that will be used and initialize list that will hold predictions
+# reset lists and set scores that will be used
+graphs <- graphs[1]
+years.list <- years.list[1]
 scores <- c("aic-cg", "bic-cg", "loglik-cg", "pred-loglik-cg")
 
 # initialize data for pred-loglik-cg scoring function
@@ -424,6 +426,7 @@ Next, we will consider a variant of the PC algorithm.
 
 ```{r}
 graphs <- graphs[1]
+years.list <- years.list[1]
 alphas = c(0.005, 0.01)
 
 # run all algorithm variants
