@@ -212,15 +212,15 @@ plot.preds <- function(i, j, title)
   ))
 }
 
-graphsMetrics <- function(titles)
+graphsMSEs <- function(titles)
 {
   ntitles <- length(titles)
   metrics <- data.frame(matrix(
-    c(rep(0, len=5*ntitles), rep(Inf, len=ntitles)),
+    c(rep(0, len=4*ntitles), rep(Inf, len=ntitles)),
     byrow=TRUE,
-    nrow=6,
+    nrow=5,
     ncol=ntitles,
-    dimnames=list(c("arcs", "mse.cas", "mse.reg", "mse.tot", "bestMSEidx", "0"), titles)
+    dimnames=list(c("mse.cas", "mse.reg", "mse.tot", "bestMSEidx", "0"), titles)
   ))
   
   for (i in 1:ntitles)
@@ -229,34 +229,33 @@ graphsMetrics <- function(titles)
     {
       graph <- graphs[[i]][[j]]
       yrs <- years.list[[i]][[j]]
-      arcs.mses <- c(
-        length(arcs(graph)) / 2,
+      mses <- c(
         mean((data$casual - yrs$casual)^2),
         mean((data$registered - yrs$registered)^2),
         mean(((data$casual + data$registered) - (yrs$casual + yrs$registered))^2)
       )
-      metrics[1:4,i] <- metrics[1:4,i] + (arcs.mses - metrics[1:4,i]) / j
+      metrics[1:3,i] <- metrics[1:3,i] + (mses - metrics[1:3,i]) / j
       
-      if (arcs.mses[4] < metrics[6,i])
+      if (mses[3] < metrics[5,i])
       {
-        metrics[5,i] <- j
-        metrics[6,i] <- arcs.mses[4]
+        metrics[4,i] <- j
+        metrics[5,i] <- mses[3]
       }
     }
   }
   
-  return(metrics[1:5,])
+  return(metrics[1:4,])
 }
 
-graphsDists <- function(titles)
+graphsArcsDists <- function(titles)
 {
   ntitles <- length(titles)
-  dists <- data.frame(matrix(
-    c(rep(0, len=4*ntitles), rep(Inf, len=2*ntitles)),
+  metrics <- data.frame(matrix(
+    c(rep(0, len=5*ntitles), rep(Inf, len=2*ntitles)),
     byrow=TRUE,
-    nrow=6,
+    nrow=7,
     ncol=ntitles,
-    dimnames=list(c("SID", "SHD", "bestSIDidx", "bestSHDidx", "0", "1"), titles)
+    dimnames=list(c("arcs", "SID", "SHD", "bestSIDidx", "bestSHDidx", "0", "1"), titles)
   ))
   
   true.graph <- graphs[[1]][[1]]
@@ -265,26 +264,27 @@ graphsDists <- function(titles)
     for (j in 1:length(graphs[[i+1]]))
     {
       learned.graph <- graphs[[i+1]][[j]]
-      sid.shd <- c(
+      arcs.sid.shd <- c(
+        length(arcs(learned.graph)) / 2,
         structIntervDist(amat(true.graph), amat(learned.graph))$sid,
         hammingDist(amat(true.graph), amat(learned.graph))
       )
-      dists[1:2,i] <- dists[1:2,i] + (sid.shd - dists[1:2,i]) / j
+      metrics[1:3,i] <- metrics[1:3,i] + (arcs.sid.shd - metrics[1:3,i]) / j
       
-      if (sid.shd[1] < dists[5,i])
+      if (arcs.sid.shd[2] < metrics[6,i])
       {
-        dists[3,i] <- j
-        dists[5,i] <- sid.shd[1]
+        metrics[4,i] <- j
+        metrics[6,i] <- arcs.sid.shd[2]
       }
-      if (sid.shd[2] < dists[6,i])
+      if (arcs.sid.shd[3] < metrics[7,i])
       {
-        dists[4,i] <- j
-        dists[6,i] <- sid.shd[2]
+        metrics[5,i] <- j
+        metrics[7,i] <- arcs.sid.shd[3]
       }
     }
   }
   
-  return(dists[1:4,])
+  return(metrics[1:5,])
 }
 
 graphsPageRanks <- function(titles)
@@ -397,25 +397,25 @@ run.networks(n.iters, TRUE, hc, factor.data, score=scores[3])
 run.networks(n.iters, TRUE, hc, factor.data80, score=scores[4], newdata=factor.data20)
 
 # compute and show the metrics
-metrics <- graphsMetrics(c("manual", scores)); print(metrics)
-dists <- graphsDists(scores); print(dists)
+MSEs <- graphsMSEs(c("manual", scores)); print(MSEs)
+arcs.dists <- graphsArcsDists(scores); print(arcs.dists)
 pageRanks <- graphsPageRanks(c("manual", scores)); print(pageRanks)
 ```
 
 ```{r}
-for (i in 1:length(scores))
+for (i in 1:length(c("manual", scores)))
 {
-  bestIdx <- dists["bestSIDidx",i]
-  plot(graphs[[i]][[bestIdx]], main=sprintf("Best %s network", scores[i]))
+  bestIdx <- if (i == 1) 1 else arcs.dists["bestSIDidx",i-1]
+  plot(graphs[[i]][[bestIdx]], main=sprintf("Best %s network", c("Manual", scores)[i]))
 }
 ```
 ```{r}
 for (i in 1:length(c("manual", scores)))
 {
-  bestIdx <- metrics["bestMSEidx",i]
+  bestIdx <- MSEs["bestMSEidx",i]
   title <- sprintf("Best %s predictions MSE=%.0f",
     c("manual", scores)[i],
-    metrics["mse.tot", i]
+    MSEs["mse.tot", i]
   )
   plot(plot.preds(i, bestIdx, title))
 }
@@ -436,15 +436,14 @@ run.networks(n.iters, FALSE, pc.stable, factor.data, alpha=alphas[2])
 
 # compute and show the metrics
 alpha.titles = paste0("alpha=", alphas)
-dists <- graphsDists(alpha.titles); print(dists)
+arcs.dists <- graphsArcsDists(alpha.titles); print(arcs.dists)
 pageRanks <- graphsPageRanks(c("manual", alpha.titles)); print(pageRanks)
 ```
 
 ```{r}
-for (i in 1:length(alphas))
+for (i in 1:length(c("manual", alphas)))
 {
-  bestIdx <- dists["bestSIDidx",i]
-  plot(graphs[[i]][[bestIdx]], main=sprintf("Best alpha=%s network", alphas[i]))
+  bestIdx <- if (i == 1) 1 else arcs.dists["bestSIDidx",i-1]
+  plot(graphs[[i]][[bestIdx]], main=sprintf("Best %s network", c("Manual", alpha.titles)[i]))
 }
 ```
-
