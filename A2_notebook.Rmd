@@ -295,7 +295,7 @@ graphsMetrics <- function(titles)
     {
       learned.graph <- graphs[[i]][[j]]
       arcs.sid.shd <- c(
-        nrow(arcs(learned.graph)),
+        narcs(learned.graph),
         structIntervDist(amat(true.graph), amat(learned.graph))$sid,
         hammingDist(amat(true.graph), amat(learned.graph))
       )
@@ -315,8 +315,9 @@ graphsMetrics <- function(titles)
   }
   
   MECs <- graphsMECs(titles)
+  degrees <- graphsDegCentralities(titles)
   
-  return(rbind(metrics[1:5,], MECs))
+  return(rbind(metrics[1:5,], MECs, degrees))
 }
 
 graphsPageRanks <- function(titles)
@@ -397,6 +398,37 @@ graphsMECs <- function(titles)
       }
     }
     metrics[1,i] <- length(mecs.arcs)
+  }
+  
+  return(metrics)
+}
+
+graphsDegCentralities <- function(titles)
+{
+  ntitles <- length(titles)
+  metrics <- data.frame(matrix(
+    rep(0, len=ntitles),
+    nrow=1,
+    ncol=ntitles,
+    dimnames=list("Degree Centrality", titles)
+  ))
+  
+  for (i in 1:ntitles)
+  {
+    for (j in 1:length(graphs[[i]]))
+    {
+      graph <- graphs[[i]][[j]]
+      max.deg <- 0
+      H <- nnodes(graph)^2 - 3*nnodes(graph) + 2
+      for (k in 1:nnodes(graph))
+      {
+        deg <- degree(graph, nodes(graph)[k])
+        metrics[1,i] <- metrics[1,i] - deg / H
+        max.deg <- max(max.deg, deg)
+      }
+      metrics[1,i] <- metrics[1,i] + nnodes(graph) * max.deg / H
+    }
+    metrics[1,i] <- metrics[1,i] / length(graphs[[i]])
   }
   
   return(metrics)
