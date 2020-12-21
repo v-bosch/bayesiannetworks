@@ -316,11 +316,20 @@ graphsMetrics <- function(titles)
   
   MECs <- graphsMECs(titles)
   degrees <- graphsDegCentralities(titles)
-  precisions <- graphsPrecisions(titles)
-  recalls <- graphsRecalls(titles)
-  f1s <- 2 * precisions * recalls / (precisions + recalls)
+  reversals <- graphsReversals(titles)
   
-  return(rbind(metrics[1:5,], MECs, degrees, precisions, recalls, F1=f1s))
+  confMatrices <- graphsConfMatrices(titles)
+  micro.precisions <- confMatrices[1,] / (confMatrices[1,] + confMatrices[2,])
+  micro.recalls <- confMatrices[1,] / (confMatrices[1,] + confMatrices[3,])
+  micro.f1s <- 2 * micro.precisions * micro.recalls / (micro.precisions + micro.recalls)
+  
+  confMatrices <- sweep(confMatrices, 2, unlist(lapply(graphs, length)), "/")
+  DDMs <- (confMatrices[1,] + reversals[1,] / 2 - confMatrices[2,] - confMatrices[3,]) / 24
+  BSFs <- ((confMatrices[1,] - confMatrices[3,]) / 24 + (confMatrices[4,] - confMatrices[2,]) / 67) / 2
+  
+  return(rbind(
+    metrics[1:5,], MECs, degrees, confMatrices, Precision=micro.precisions,
+    Recall=micro.recalls, F1=micro.f1s, DDM=DDMs, BSF=BSFs))
 }
 
 graphsPageRanks <- function(titles)
@@ -437,28 +446,28 @@ graphsDegCentralities <- function(titles)
   return(metrics)
 }
 
-graphsPrecisions <- function(titles)
+graphsReversals <- function(titles)
 {
   ntitles <- length(titles)
   metrics <- data.frame(matrix(
     rep(0, len=ntitles),
     nrow=1,
     ncol=ntitles,
-    dimnames=list("Precision", titles)
+    dimnames=list("r", titles)
   ))
   
   true.arcs <- arcs(graphs[[1]][[1]])
+  K <- nrow(true.arcs)
   for (i in 1:ntitles)
   {
-    for (j in 1:length(graphs[[i]]))
+    for (j in 1:length(graphs[[1]]))
     {
       learned.arcs <- arcs(graphs[[i]][[j]])
-      K <- nrow(learned.arcs)
       for (k in 1:K)
       {
-        from <- learned.arcs[k,"from"]
-        tos <- true.arcs[true.arcs[,"from"] == from,"to"]
-        metrics[1,i] <- metrics[1,i] + (learned.arcs[k,"to"] %in% tos) / K
+        from <- true.arcs[k,"from"]
+        froms <- learned.arcs[learned.arcs[,"to"] == from,"from"]
+        metrics[1,i] <- metrics[1,i] + true.arcs[k,"to"] %in% froms
       }
     }
     metrics[1,i] <- metrics[1,i] / length(graphs[[i]])
@@ -467,14 +476,14 @@ graphsPrecisions <- function(titles)
   return(metrics)
 }
 
-graphsRecalls <- function(titles)
+graphsConfMatrices <- function(titles)
 {
   ntitles <- length(titles)
   metrics <- data.frame(matrix(
-    rep(0, len=ntitles),
-    nrow=1,
+    rep(0, len=4*ntitles),
+    nrow=4,
     ncol=ntitles,
-    dimnames=list("Recall", titles)
+    dimnames=list(c("TP", "FP", "FN", "TN"), titles)
   ))
   
   true.arcs <- arcs(graphs[[1]][[1]])
@@ -483,15 +492,20 @@ graphsRecalls <- function(titles)
   {
     for (j in 1:length(graphs[[i]]))
     {
+      correct.arcs <- 0
       learned.arcs <- arcs(graphs[[i]][[j]])
       for (k in 1:K)
       {
         from <- true.arcs[k,"from"]
         tos <- learned.arcs[learned.arcs[,"from"] == from,"to"]
-        metrics[1,i] <- metrics[1,i] + (true.arcs[k,"to"] %in% tos) / K
+        arc.in <- true.arcs[k,"to"] %in% tos
+        metrics[1,i] <- metrics[1,i] + arc.in
+        correct.arcs <- correct.arcs + arc.in
       }
+      metrics[2,i] <- metrics[2,i] + nrow(learned.arcs) - correct.arcs
+      metrics[3,i] <- metrics[3,i] + nrow(true.arcs) - correct.arcs
+      metrics[4,i] <- metrics[4,i] + 91 - correct.arcs - nrow(learned.arcs) -  nrow(true.arcs) + 2 * correct.arcs
     }
-    metrics[1,i] <- metrics[1,i] / length(graphs[[i]])
   }
   
   return(metrics)
@@ -574,7 +588,7 @@ factor.data80 <- factor.data100[1:cut,]
 factor.data20 <- factor.data100[(cut + 1):nrow(data),]
 
 # run all algorithm variants
-n.iters = 1
+n.iters = 4
 run.networks(n.iters, TRUE, hc, factor.data, score=scores[1])
 run.networks(n.iters, TRUE, hc, factor.data, score=scores[2])
 run.networks(n.iters, TRUE, hc, factor.data, score=scores[3])
