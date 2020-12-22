@@ -6,15 +6,14 @@ Let's start with importing the necessary libraries.
 #if (!requireNamespace("BiocManager", quietly = TRUE))
 #  install.packages("BiocManager")
 #BiocManager::install("RBGL")
-#install.packages("birankr")
-#install.packages("bnlearn")
-#intall.packages("SID")
+#install.packages(c("birankr", "SID", "sna", "bnlearn"))
 library(birankr)
-library(bnlearn)
 library(dagitty)
 library(ggplot2)
 library(ggpubr)
 library(SID)
+library(sna)
+library(bnlearn)
 ```
 
 Let's now load the data from storage and determine the indices at which each day starts.
@@ -257,7 +256,7 @@ graphsMSEs <- function(titles) {
 graphsMetrics <- function(titles) {
   arcs.dists <- graphsArcsDists(titles)
   MECs <- graphsMECs(titles)
-  degrees <- graphsDegCentralities(titles)
+  centralities <- graphsCentralities(titles)
   reversals <- graphsReversals(titles)
   
   confMatrices <- graphsConfMatrices(titles)
@@ -270,7 +269,7 @@ graphsMetrics <- function(titles) {
   BSFs <- ((confMatrices[1,] - confMatrices[3,]) / 24 + (confMatrices[4,] - confMatrices[2,]) / 67) / 2
   
   return(rbind(
-    arcs.dists, MECs, degrees, confMatrices, Precision=micro.precisions,
+    arcs.dists, MECs, centralities, confMatrices, Precision=micro.precisions,
     Recall=micro.recalls, F1=micro.f1s, DDM=DDMs, BSF=BSFs
   ))
 }
@@ -359,13 +358,13 @@ graphsMECs <- function(titles) {
   return(metrics)
 }
 
-graphsDegCentralities <- function(titles) {
+graphsCentralities <- function(titles) {
   ntitles <- length(titles)
   metrics <- data.frame(matrix(
-    rep(0, len=ntitles),
-    nrow=1,
+    rep(0, len=2*ntitles),
+    nrow=2,
     ncol=ntitles,
-    dimnames=list("Degree Centrality", titles)
+    dimnames=list(c("DegreeC", "BetweennessC"), titles)
   ))
   
   for (i in 1:ntitles) {
@@ -379,8 +378,12 @@ graphsDegCentralities <- function(titles) {
         max.deg <- max(max.deg, deg)
       }
       metrics[1,i] <- metrics[1,i] + nnodes(graph) * max.deg / H
+      
+      betweennesses <- betweenness(amat(graph))
+      metrics[2,i] <- metrics[2,i] - sum(betweennesses) / H
+      metrics[2,i] <- metrics[2,i] + nnodes(graph) * max(betweennesses) / H
     }
-    metrics[1,i] <- metrics[1,i] / length(graphs[[i]])
+    metrics[1:2,i] <- metrics[1:2,i] / length(graphs[[i]])
   }
   
   return(metrics)
@@ -576,8 +579,7 @@ Next, we will consider a variant of the PC algorithm.
 ```{r}
 graphs <- graphs[1]
 years.list <- years.list[1]
-alphas = c(0.0001, 0.001, 0.01, 0.1)
-# scaled.data$weathersit <- scale(as.numeric(data$weathersit))[,1]
+alphas = c(0.0001, 0.001, 0.01, 0.05, 0.1)
 
 # run all algorithm variants
 n.iters = 1
