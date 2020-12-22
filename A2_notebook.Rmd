@@ -1,11 +1,4 @@
----
-title: "Structure Learning"
-output:
-  pdf_document: default
-  html_notebook: default
----
-
-## Structure Learning a Bayesian Network given bike sharing data
+# Structure Learning a Bayesian Network given bike sharing data
 
 Let's start with importing the necessary libraries.
 
@@ -108,18 +101,14 @@ load.data <- function()
   
   # aggregate over hours to get daily variables
   day.intervals <- c(day.starts, nrow(hourly.data) + 1)
-  for (day in data$day)
-  {
+  for (day in data$day) {
     day.data <- hourly.data[day.intervals[day]:(day.intervals[day + 1] - 1),]
     
-    if (sum(day.data$weathersit == 3 | day.data$weathersit == 4) >= 3)
-    {
+    if (sum(day.data$weathersit == 3 | day.data$weathersit == 4) >= 3) {
       data$weathersit[day] <- 3
-    } else if (sum(day.data$weathersit == 2 | day.data$weathersit == 3 | day.data$weathersit == 4) >= 3)
-    {
+    } else if (sum(day.data$weathersit == 2 | day.data$weathersit == 3 | day.data$weathersit == 4) >= 3) {
       data$weathersit[day] <- 2
-    } else
-    {
+    } else {
       data$weathersit[day] <- 1
     }
     
@@ -169,47 +158,40 @@ n.factor.data <- cbind(
 
 ```{r include=FALSE}
 non.numeric.cols = c("rallyprotest", "holiday", "season", "workingday", "weathersit")
-remove.illegal.arcs <- function(g)
-{
+remove.illegal.arcs <- function(g) {
   # remove illegal arcs from given graph
   illegal.arcs <- arcs(g)[,"to"] %in% non.numeric.cols
   arcs(g) <- arcs(g)[!illegal.arcs,]
   return(g)
 }
 
-run.networks <- function(n.iters, pred, alg, ...)
+run.networks <- function(n.iters, variant, alg, ...)
 {
   graphs <<- append(graphs, list(vector("list", n.iters)))
+  years.list <<- append(years.list, list(vector("list", n.iters)))
   
-  if (pred)  # Hill Climbing algo
-  {
-    years.list <<- append(years.list, list(vector("list", n.iters)))
-    for (i in 1:n.iters)
-    {
+  if (variant == 1) {  # Hill Climbing starting from random DAG
+    for (i in 1:n.iters) {
       # generate random DAG with no illegal arcs
       rand.graph <- random.graph(colnames(data), method="melancon")
       rand.graph <- remove.illegal.arcs(rand.graph)
       
       # learn structure starting from generated DAG given the data
       g <- alg(..., start=rand.graph, restart=5, perturb=10, max.iter=1000)
-      save.network(g, i, pred)
+      save.network(g, i, variant)
     }
-    
-  } else {  # PC algo
-    for (i in 1:n.iters)
-    {
+  } else {  # PC algorithm or Hill Climbing starting from empty DAG
+    for (i in 1:n.iters) {
       g <- alg(...)
-      save.network(g, i, pred)
+      save.network(g, i, variant)
     }
   }
 }
 
-save.network <- function(g, i, pred)
-{
+save.network <- function(g, i, pred) {
   graphs[[length(graphs)]][[i]] <<- g
   
-  if (pred)
-  {
+  if (pred) {
     g <- remove.illegal.arcs(g)
     
     # predict with SEM using bnlearn package
@@ -221,8 +203,7 @@ save.network <- function(g, i, pred)
   }
 }
 
-plot.preds <- function(i, j, title)
-{
+plot.preds <- function(i, j, title) {
   plot(ggarrange(
     ggplot(data) +
       geom_line(aes(x=day, y=casual)) +
@@ -242,8 +223,7 @@ plot.preds <- function(i, j, title)
   ))
 }
 
-graphsMSEs <- function(titles)
-{
+graphsMSEs <- function(titles) {
   ntitles <- length(titles)
   metrics <- data.frame(matrix(
     c(rep(0, len=4*ntitles), rep(Inf, len=ntitles)),
@@ -253,10 +233,8 @@ graphsMSEs <- function(titles)
     dimnames=list(c("mse.cas", "mse.reg", "mse.tot", "bestMSEidx", "0"), titles)
   ))
   
-  for (i in 1:ntitles)
-  {
-    for (j in 1:length(years.list[[i]]))
-    {
+  for (i in 1:ntitles) {
+    for (j in 1:length(years.list[[i]])) {
       graph <- graphs[[i]][[j]]
       yrs <- years.list[[i]][[j]]
       mses <- c(
@@ -266,8 +244,7 @@ graphsMSEs <- function(titles)
       )
       metrics[1:3,i] <- metrics[1:3,i] + (mses - metrics[1:3,i]) / j
       
-      if (mses[3] < metrics[5,i])
-      {
+      if (mses[3] < metrics[5,i]) {
         metrics[4,i] <- j
         metrics[5,i] <- mses[3]
       }
@@ -277,43 +254,8 @@ graphsMSEs <- function(titles)
   return(metrics[1:4,])
 }
 
-graphsMetrics <- function(titles)
-{
-  ntitles <- length(titles)
-  metrics <- data.frame(matrix(
-    c(rep(0, len=5*ntitles), rep(Inf, len=2*ntitles)),
-    byrow=TRUE,
-    nrow=7,
-    ncol=ntitles,
-    dimnames=list(c("arcs", "SID", "SHD", "bestSIDidx", "bestSHDidx", "0", "1"), titles)
-  ))
-  
-  true.graph <- graphs[[1]][[1]]
-  for (i in 1:ntitles)
-  {
-    for (j in 1:length(graphs[[i]]))
-    {
-      learned.graph <- graphs[[i]][[j]]
-      arcs.sid.shd <- c(
-        narcs(learned.graph),
-        structIntervDist(amat(true.graph), amat(learned.graph))$sid,
-        hammingDist(amat(true.graph), amat(learned.graph))
-      )
-      metrics[1:3,i] <- metrics[1:3,i] + (arcs.sid.shd - metrics[1:3,i]) / j
-      
-      if (arcs.sid.shd[2] < metrics[6,i])
-      {
-        metrics[4,i] <- j
-        metrics[6,i] <- arcs.sid.shd[2]
-      }
-      if (arcs.sid.shd[3] < metrics[7,i])
-      {
-        metrics[5,i] <- j
-        metrics[7,i] <- arcs.sid.shd[3]
-      }
-    }
-  }
-  
+graphsMetrics <- function(titles) {
+  arcs.dists <- graphsArcsDists(titles)
   MECs <- graphsMECs(titles)
   degrees <- graphsDegCentralities(titles)
   reversals <- graphsReversals(titles)
@@ -328,43 +270,52 @@ graphsMetrics <- function(titles)
   BSFs <- ((confMatrices[1,] - confMatrices[3,]) / 24 + (confMatrices[4,] - confMatrices[2,]) / 67) / 2
   
   return(rbind(
-    metrics[1:5,], MECs, degrees, confMatrices, Precision=micro.precisions,
-    Recall=micro.recalls, F1=micro.f1s, DDM=DDMs, BSF=BSFs))
+    arcs.dists, MECs, degrees, confMatrices, Precision=micro.precisions,
+    Recall=micro.recalls, F1=micro.f1s, DDM=DDMs, BSF=BSFs
+  ))
 }
 
-graphsPageRanks <- function(titles)
-{
+graphsArcsDists <- function(titles) {
   ntitles <- length(titles)
-  pageRanks <- data.frame(matrix(
-    rep(0, len=ncol(data)*ntitles),
-    nrow=ncol(data),
+  metrics <- data.frame(matrix(
+    c(rep(0, len=5*ntitles), rep(Inf, len=2*ntitles)),
+    byrow=TRUE,
+    nrow=7,
     ncol=ntitles,
-    dimnames=list(colnames(data), titles)
+    dimnames=list(c("arcs", "SID", "SHD", "bestSIDidx", "bestSHDidx", "0", "1"), titles)
   ))
   
-  for (i in 1:ntitles)
-  {
-    for (j in 1:length(graphs[[i]]))
-    {
-      graph <- graphs[[i]][[j]]
-      gPageRanks <- pagerank(data.frame(arcs(graph)), is_bipartite=FALSE)
-      perm <- order(match(colnames(data), gPageRanks$from))[1:nrow(gPageRanks)]
+  true.graph <- graphs[[1]][[1]]
+  for (i in 1:ntitles) {
+    for (j in 1:length(graphs[[i]])) {
+      learned.graph <- graphs[[i]][[j]]
+      arcs.sid.shd <- c(
+        narcs(learned.graph),
+        structIntervDist(amat(true.graph), amat(learned.graph))$sid,
+        hammingDist(amat(true.graph), amat(learned.graph))
+      )
+      metrics[1:3,i] <- metrics[1:3,i] + (arcs.sid.shd - metrics[1:3,i]) / j
       
-      pageRanks[perm,i] <- pageRanks[perm,i] + (gPageRanks$rank - pageRanks[perm,i]) / j
+      if (arcs.sid.shd[2] < metrics[6,i]) {
+        metrics[4,i] <- j
+        metrics[6,i] <- arcs.sid.shd[2]
+      }
+      
+      if (arcs.sid.shd[3] < metrics[7,i]) {
+        metrics[5,i] <- j
+        metrics[7,i] <- arcs.sid.shd[3]
+      }
     }
   }
   
-  return(pageRanks)
+  return(metrics[1:5,])
 }
 
-compareArcs <- function(arcs1, arcs2)
-{
+compareArcs <- function(arcs1, arcs2) {
   n.arcs <- nrow(arcs1)
   n <- 0
-  for (i in 1:n.arcs)
-  {
-    if (arcs1[,"from"][i] != arcs2[,"from"][i] | arcs1[,"to"][i] != arcs2[,"to"][i])
-    {
+  for (i in 1:n.arcs) {
+    if (arcs1[,"from"][i] != arcs2[,"from"][i] | arcs1[,"to"][i] != arcs2[,"to"][i]) {
       break
     }
     n <- n + 1
@@ -373,8 +324,7 @@ compareArcs <- function(arcs1, arcs2)
   return(n == n.arcs)
 }
 
-graphsMECs <- function(titles)
-{
+graphsMECs <- function(titles) {
   ntitles <- length(titles)
   metrics <- data.frame(matrix(
     rep(0, len=ntitles),
@@ -383,29 +333,23 @@ graphsMECs <- function(titles)
     dimnames=list("MECs", titles)
   ))
   
-  for (i in 1:ntitles)
-  {
+  for (i in 1:ntitles) {
     mecs.arcs <- list()
-    for (j in 1:length(graphs[[i]]))
-    {
+    for (j in 1:length(graphs[[i]])) {
       new.mec <- TRUE
       g <- remove.illegal.arcs(graphs[[i]][[j]])
       cpdag.arcs <- arcs(cpdag(g))
-      for (mec.arcs in mecs.arcs)
-      {
-        if (nrow(mec.arcs) != nrow(cpdag.arcs))
-        {
+      for (mec.arcs in mecs.arcs) {
+        if (nrow(mec.arcs) != nrow(cpdag.arcs)) {
           next
         }
-        if (compareArcs(mec.arcs, cpdag.arcs))
-        {
+        if (compareArcs(mec.arcs, cpdag.arcs)) {
           new.mec <- FALSE
           break
         }
       }
       
-      if (new.mec)
-      {
+      if (new.mec) {
         mecs.arcs <- append(mecs.arcs, list(cpdag.arcs))
       }
     }
@@ -415,8 +359,7 @@ graphsMECs <- function(titles)
   return(metrics)
 }
 
-graphsDegCentralities <- function(titles)
-{
+graphsDegCentralities <- function(titles) {
   ntitles <- length(titles)
   metrics <- data.frame(matrix(
     rep(0, len=ntitles),
@@ -425,15 +368,12 @@ graphsDegCentralities <- function(titles)
     dimnames=list("Degree Centrality", titles)
   ))
   
-  for (i in 1:ntitles)
-  {
-    for (j in 1:length(graphs[[i]]))
-    {
+  for (i in 1:ntitles) {
+    for (j in 1:length(graphs[[i]])) {
       graph <- graphs[[i]][[j]]
       max.deg <- 0
       H <- nnodes(graph)^2 - 3*nnodes(graph) + 2
-      for (k in 1:nnodes(graph))
-      {
+      for (k in 1:nnodes(graph)) {
         deg <- degree(graph, nodes(graph)[k])
         metrics[1,i] <- metrics[1,i] - deg / H
         max.deg <- max(max.deg, deg)
@@ -446,8 +386,7 @@ graphsDegCentralities <- function(titles)
   return(metrics)
 }
 
-graphsReversals <- function(titles)
-{
+graphsReversals <- function(titles) {
   ntitles <- length(titles)
   metrics <- data.frame(matrix(
     rep(0, len=ntitles),
@@ -458,16 +397,13 @@ graphsReversals <- function(titles)
   
   true.arcs <- arcs(graphs[[1]][[1]])
   K <- nrow(true.arcs)
-  for (i in 1:ntitles)
-  {
-    for (j in 1:length(graphs[[1]]))
-    {
+  for (i in 1:ntitles) {
+    for (j in 1:length(graphs[[i]])) {
       learned.arcs <- arcs(graphs[[i]][[j]])
-      for (k in 1:K)
-      {
+      for (k in 1:K) {
         from <- true.arcs[k,"from"]
         froms <- learned.arcs[learned.arcs[,"to"] == from,"from"]
-        metrics[1,i] <- metrics[1,i] + true.arcs[k,"to"] %in% froms
+        metrics[1,i] <- metrics[1,i] + (true.arcs[k,"to"] %in% froms)
       }
     }
     metrics[1,i] <- metrics[1,i] / length(graphs[[i]])
@@ -476,8 +412,7 @@ graphsReversals <- function(titles)
   return(metrics)
 }
 
-graphsConfMatrices <- function(titles)
-{
+graphsConfMatrices <- function(titles) {
   ntitles <- length(titles)
   metrics <- data.frame(matrix(
     rep(0, len=4*ntitles),
@@ -488,27 +423,46 @@ graphsConfMatrices <- function(titles)
   
   true.arcs <- arcs(graphs[[1]][[1]])
   K <- nrow(true.arcs)
-  for (i in 1:ntitles)
-  {
-    for (j in 1:length(graphs[[i]]))
-    {
+  for (i in 1:ntitles) {
+    for (j in 1:length(graphs[[i]])) {
       correct.arcs <- 0
       learned.arcs <- arcs(graphs[[i]][[j]])
-      for (k in 1:K)
-      {
+      for (k in 1:K) {
         from <- true.arcs[k,"from"]
         tos <- learned.arcs[learned.arcs[,"from"] == from,"to"]
         arc.in <- true.arcs[k,"to"] %in% tos
         metrics[1,i] <- metrics[1,i] + arc.in
         correct.arcs <- correct.arcs + arc.in
       }
-      metrics[2,i] <- metrics[2,i] + nrow(learned.arcs) - correct.arcs
-      metrics[3,i] <- metrics[3,i] + nrow(true.arcs) - correct.arcs
-      metrics[4,i] <- metrics[4,i] + 91 - correct.arcs - nrow(learned.arcs) -  nrow(true.arcs) + 2 * correct.arcs
+      metrics[2,i] <- metrics[2,i] + narcs(graphs[[i]][[j]]) - correct.arcs
+      metrics[3,i] <- metrics[3,i] + narcs(graphs[[1]][[1]]) - correct.arcs
+      metrics[4,i] <- metrics[4,i] + 91 + correct.arcs - narcs(graphs[[i]][[j]]) - narcs(graphs[[1]][[1]])
     }
   }
   
   return(metrics)
+}
+
+graphsPageRanks <- function(titles) {
+  ntitles <- length(titles)
+  pageRanks <- data.frame(matrix(
+    rep(0, len=ncol(data)*ntitles),
+    nrow=ncol(data),
+    ncol=ntitles,
+    dimnames=list(colnames(data), titles)
+  ))
+  
+  for (i in 1:ntitles) {
+    for (j in 1:length(graphs[[i]])) {
+      graph <- graphs[[i]][[j]]
+      gPageRanks <- pagerank(data.frame(arcs(graph)), is_bipartite=FALSE)
+      perm <- order(match(colnames(data), gPageRanks$from))[1:nrow(gPageRanks)]
+      
+      pageRanks[perm,i] <- pageRanks[perm,i] + (gPageRanks$rank - pageRanks[perm,i]) / j
+    }
+  }
+  
+  return(pageRanks)
 }
 
 # initialize lists that will hold graphs, respectively predictions
@@ -577,7 +531,7 @@ First, we will try the hill climbing algorithm which learns structure based on a
 # reset lists and set scores that will be used
 graphs <- graphs[1]
 years.list <- years.list[1]
-scores <- c("aic-cg", "bic-cg", "loglik-cg")  # "pred-loglik-cg"
+scores <- c("aic-cg", "bic-cg", "loglik-cg", "pred-loglik-cg")
 
 # initialize data for pred-loglik-cg scoring function
 set.seed(2020)
@@ -588,11 +542,12 @@ factor.data80 <- factor.data100[1:cut,]
 factor.data20 <- factor.data100[(cut + 1):nrow(data),]
 
 # run all algorithm variants
-n.iters = 4
-run.networks(n.iters, TRUE, hc, factor.data, score=scores[1])
-run.networks(n.iters, TRUE, hc, factor.data, score=scores[2])
-run.networks(n.iters, TRUE, hc, factor.data, score=scores[3])
-#run.networks(n.iters, TRUE, hc, factor.data80, score="pred-loglik-cg", newdata=factor.data20)
+n.iters = 1
+random <- FALSE
+run.networks(n.iters, 2 - random, hc, factor.data, score=scores[1])
+run.networks(n.iters, 2 - random, hc, factor.data, score=scores[2])
+run.networks(n.iters, 2 - random, hc, factor.data, score=scores[3])
+run.networks(n.iters, 2 - random, hc, factor.data80, score=scores[4], newdata=factor.data20)
 
 # compute and show the metrics
 titles <- c("manual", scores)
@@ -602,15 +557,13 @@ pageRanks <- graphsPageRanks(titles); print(pageRanks)
 ```
 
 ```{r}
-for (i in 1:length(titles))
-{
+for (i in 1:length(titles)) {
   bestIdx <- metrics["bestSIDidx",i]
   plot(graphs[[i]][[bestIdx]], main=sprintf("Best %s network", titles[i]))
 }
 ```
 ```{r}
-for (i in 1:length(titles))
-{
+for (i in 1:length(titles)) {
   bestIdx <- MSEs["bestMSEidx",i]
   title <- sprintf("Best %s predictions MSE=%.0f", titles[i], MSEs["mse.tot", i])
   plot.preds(i, bestIdx, title)
@@ -623,18 +576,14 @@ Next, we will consider a variant of the PC algorithm.
 ```{r}
 graphs <- graphs[1]
 years.list <- years.list[1]
-alphas = c(0.0005, 0.001, 0.005, 0.01, 0.05, 0.1, 0.5)
+alphas = c(0.0001, 0.001, 0.01, 0.1)
 # scaled.data$weathersit <- scale(as.numeric(data$weathersit))[,1]
 
 # run all algorithm variants
 n.iters = 1
-run.networks(n.iters, FALSE, pc.stable, factor.data, alpha=alphas[1])
-run.networks(n.iters, FALSE, pc.stable, factor.data, alpha=alphas[2])
-run.networks(n.iters, FALSE, pc.stable, factor.data, alpha=alphas[3])
-run.networks(n.iters, FALSE, pc.stable, factor.data, alpha=alphas[4])
-run.networks(n.iters, FALSE, pc.stable, factor.data, alpha=alphas[5])
-run.networks(n.iters, FALSE, pc.stable, factor.data, alpha=alphas[6])
-run.networks(n.iters, FALSE, pc.stable, factor.data, alpha=alphas[7])
+for (alpha in alphas) {
+  run.networks(n.iters, FALSE, pc.stable, factor.data, alpha=alpha)
+}
 
 # compute and show the metrics
 titles = c("manual", paste0("alpha=", alphas))
@@ -643,8 +592,7 @@ pageRanks <- graphsPageRanks(titles); print(pageRanks)
 ```
 
 ```{r}
-for (i in 1:length(titles))
-{
+for (i in 1:length(titles)) {
   bestIdx <- metrics["bestSIDidx",i]
   plot(graphs[[i]][[bestIdx]], main=sprintf("Best %s network", titles[i]))
 }
