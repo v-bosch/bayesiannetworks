@@ -158,99 +158,31 @@ n.factor.data <- cbind(
 ```{r include=FALSE}
 non.numeric.cols = c("rallyprotest", "holiday", "season", "workingday", "weathersit")
 remove.illegal.arcs <- function(g) {
-  # remove illegal arcs from given graph
-  illegal.arcs <- arcs(g)[,"to"] %in% non.numeric.cols
-  arcs(g) <- arcs(g)[!illegal.arcs,]
+  # remove arcs from numeric to non-numeric variables
+  from.non.numeric.arcs <- arcs(g)[,"from"] %in% non.numeric.cols
+  to.numeric.arcs <- !arcs(g)[,"to"] %in% non.numeric.cols
+  arcs(g) <- arcs(g)[to.numeric.arcs | from.non.numeric.arcs,]
   return(g)
 }
 
 run.networks <- function(n.iters, variant, alg, ...)
 {
   graphs <<- append(graphs, list(vector("list", n.iters)))
-  years.list <<- append(years.list, list(vector("list", n.iters)))
   
-  if (variant == 1) {  # Hill Climbing starting from random DAG
-    for (i in 1:n.iters) {
+  for (i in 1:n.iters) {
+    if (variant == 1) {  # Hill Climbing starting from random DAG
       # generate random DAG with no illegal arcs
       rand.graph <- random.graph(colnames(data), method="melancon")
       rand.graph <- remove.illegal.arcs(rand.graph)
       
       # learn structure starting from generated DAG given the data
       g <- alg(..., start=rand.graph, restart=5, perturb=10, max.iter=1000)
-      save.network(g, i, variant)
-    }
-  } else {  # PC algorithm or Hill Climbing starting from empty DAG
-    for (i in 1:n.iters) {
+    } else {  # PC algorithm or Hill Climbing starting from empty DAG
       g <- alg(...)
-      save.network(g, i, variant)
     }
-  }
-}
-
-save.network <- function(g, i, pred) {
-  graphs[[length(graphs)]][[i]] <<- g
-  
-  if (pred) {
-    g <- remove.illegal.arcs(g)
     
-    # predict with SEM using bnlearn package
-    fit <- bn.fit(g, n.factor.data)  # use non-scaled factor version of data for prediction
-    years <- subset(n.factor.data, select=-c(casual, registered))
-    years$casual <- predict(fit, node="casual", data=years, method="bayes-lw")
-    years$registered <- predict(fit, node="registered", data=years, method="bayes-lw")
-    years.list[[length(graphs)]][[i]] <<- years
+    graphs[[length(graphs)]][[i]] <<- cpdag(remove.illegal.arcs(g))
   }
-}
-
-plot.preds <- function(i, j, title) {
-  plot(ggarrange(
-    ggplot(data) +
-      geom_line(aes(x=day, y=casual)) +
-      geom_line(aes(x=day, y=casual + registered)) +
-      geom_ribbon(aes(x=day, ymin=0, ymax=casual), fill="red", alpha=0.5) +
-      geom_ribbon(aes(x=day, ymin=casual, ymax=casual + registered), fill="blue", alpha=0.5) +
-      ylim(-600, max(data$casual + data$registered)) +
-      xlab("days") + ylab("True total number of users"),
-    ggplot(years.list[[i]][[j]]) +
-      geom_line(aes(x=day, y=casual)) +
-      geom_line(aes(x=day, y=casual + registered)) +
-      geom_ribbon(aes(x=day, ymin=0, ymax=casual), fill="red", alpha=0.5) +
-      geom_ribbon(aes(x=day, ymin=casual, ymax=casual + registered), fill="blue", alpha=0.5) +
-      ylim(-600, max(data$casual + data$registered)) +
-      ggtitle(title) + xlab("days") + ylab("Predicted total number of users"),
-    nrow=2
-  ))
-}
-
-graphsMSEs <- function(titles) {
-  ntitles <- length(titles)
-  metrics <- data.frame(matrix(
-    c(rep(0, len=4*ntitles), rep(Inf, len=ntitles)),
-    byrow=TRUE,
-    nrow=5,
-    ncol=ntitles,
-    dimnames=list(c("mse.cas", "mse.reg", "mse.tot", "bestMSEidx", "0"), titles)
-  ))
-  
-  for (i in 1:ntitles) {
-    for (j in 1:length(years.list[[i]])) {
-      graph <- graphs[[i]][[j]]
-      yrs <- years.list[[i]][[j]]
-      mses <- c(
-        mean((data$casual - yrs$casual)^2),
-        mean((data$registered - yrs$registered)^2),
-        mean(((data$casual + data$registered) - (yrs$casual + yrs$registered))^2)
-      )
-      metrics[1:3,i] <- metrics[1:3,i] + (mses - metrics[1:3,i]) / j
-      
-      if (mses[3] < metrics[5,i]) {
-        metrics[4,i] <- j
-        metrics[5,i] <- mses[3]
-      }
-    }
-  }
-  
-  return(metrics[1:4,])
 }
 
 graphsMetrics <- function(titles) {
@@ -336,8 +268,7 @@ graphsMECs <- function(titles) {
     mecs.arcs <- list()
     for (j in 1:length(graphs[[i]])) {
       new.mec <- TRUE
-      g <- remove.illegal.arcs(graphs[[i]][[j]])
-      cpdag.arcs <- arcs(cpdag(g))
+      cpdag.arcs <- arcs(graphs[[i]][[j]])
       for (mec.arcs in mecs.arcs) {
         if (nrow(mec.arcs) != nrow(cpdag.arcs)) {
           next
@@ -405,8 +336,10 @@ graphsReversals <- function(titles) {
       learned.arcs <- arcs(graphs[[i]][[j]])
       for (k in 1:K) {
         from <- true.arcs[k,"from"]
+        to <- true.arcs[k,"to"]
         froms <- learned.arcs[learned.arcs[,"to"] == from,"from"]
-        metrics[1,i] <- metrics[1,i] + (true.arcs[k,"to"] %in% froms)
+        tos <- learned.arcs[learned.arcs[,"to"] == to,"from"]
+        metrics[1,i] <- metrics[1,i] + (to %in% froms) * !(from %in% tos)
       }
     }
     metrics[1,i] <- metrics[1,i] / length(graphs[[i]])
@@ -438,8 +371,8 @@ graphsConfMatrices <- function(titles) {
         correct.arcs <- correct.arcs + arc.in
       }
       metrics[2,i] <- metrics[2,i] + narcs(graphs[[i]][[j]]) - correct.arcs
-      metrics[3,i] <- metrics[3,i] + narcs(graphs[[1]][[1]]) - correct.arcs
-      metrics[4,i] <- metrics[4,i] + 91 + correct.arcs - narcs(graphs[[i]][[j]]) - narcs(graphs[[1]][[1]])
+      metrics[3,i] <- metrics[3,i] + K - correct.arcs
+      metrics[4,i] <- metrics[4,i] + 91 + correct.arcs - narcs(graphs[[i]][[j]]) - K
     }
   }
   
@@ -468,9 +401,8 @@ graphsPageRanks <- function(titles) {
   return(pageRanks)
 }
 
-# initialize lists that will hold graphs, respectively predictions
+# initialize list that will hold graphs
 graphs <- list(vector("list", 1))
-years.list <- list(vector("list", 1))
 ```
 
 ### Manual
@@ -522,7 +454,7 @@ manual.g <- dagitty(paste('dag {',
 manual.g <- model2network(toString(manual.g, "bnlearn"))
 
 # save network to lists and plot the network
-save.network(manual.g, 1, pred=TRUE)
+graphs[[1]][[1]] <- manual.g
 plot(manual.g, main="Manually constructed network")
 ```
 
@@ -533,8 +465,9 @@ First, we will try the hill climbing algorithm which learns structure based on a
 ```{r}
 # reset lists and set scores that will be used
 graphs <- graphs[1]
-years.list <- years.list[1]
-scores <- c("aic-cg", "bic-cg", "loglik-cg", "pred-loglik-cg")
+scores <- c("bic-cg", "pred-loglik-cg", "aic-cg", "loglik-cg")
+#scores <- c("bic-cg", "aic-cg", "loglik-cg")
+#scores <- "pred-loglik-cg"
 
 # initialize data for pred-loglik-cg scoring function
 set.seed(2020)
@@ -548,13 +481,12 @@ factor.data20 <- factor.data100[(cut + 1):nrow(data),]
 n.iters = 1
 random <- FALSE
 run.networks(n.iters, 2 - random, hc, factor.data, score=scores[1])
-run.networks(n.iters, 2 - random, hc, factor.data, score=scores[2])
+run.networks(n.iters, 2 - random, hc, factor.data80, score=scores[2], newdata=factor.data20)
 run.networks(n.iters, 2 - random, hc, factor.data, score=scores[3])
-run.networks(n.iters, 2 - random, hc, factor.data80, score=scores[4], newdata=factor.data20)
+run.networks(n.iters, 2 - random, hc, factor.data, score=scores[4])
 
 # compute and show the metrics
 titles <- c("manual", scores)
-MSEs <- graphsMSEs(titles); print(MSEs)
 metrics <- graphsMetrics(titles); print(metrics)
 pageRanks <- graphsPageRanks(titles); print(pageRanks)
 ```
@@ -565,20 +497,11 @@ for (i in 1:length(titles)) {
   plot(graphs[[i]][[bestIdx]], main=sprintf("Best %s network", titles[i]))
 }
 ```
-```{r}
-for (i in 1:length(titles)) {
-  bestIdx <- MSEs["bestMSEidx",i]
-  title <- sprintf("Best %s predictions MSE=%.0f", titles[i], MSEs["mse.tot", i])
-  plot.preds(i, bestIdx, title)
-}
-```
-
 ### PC
 Next, we will consider a variant of the PC algorithm.
 
 ```{r}
 graphs <- graphs[1]
-years.list <- years.list[1]
 alphas = c(0.0001, 0.001, 0.01, 0.05, 0.1)
 
 # run all algorithm variants
