@@ -3,14 +3,15 @@
 Let's start with importing the necessary libraries.
 
 ```{r}
-#if (!requireNamespace("BiocManager", quietly = TRUE))
+# run the commented lines in the console to install the necessary packages
+#if (!requireNamespace("BiocManager", quietly=TRUE))
 #  install.packages("BiocManager")
 #BiocManager::install("RBGL")
 #install.packages(c("birankr", "SID", "sna", "bnlearn"))
+
+# load the packages in the current session
 library(birankr)
 library(dagitty)
-library(ggplot2)
-library(ggpubr)
 library(SID)
 library(sna)
 library(bnlearn)
@@ -26,15 +27,12 @@ day.starts <- hourly.data$instant[!duplicated(hourly.data$dteday)]
 
 write(sprintf("Number of days in the dataset: %d", length(day.starts)), stdout())
 ```
-Now let's make the hourly dataset a daily dataset by aggregating over the hour variable.
 
 ```{r include=FALSE}
-daylength <- function(days)
-{
+daylength <- function(days) {
   result <- NULL
   L <- 38.8951  # latitude Washington D.C.
-  for (day in days) 
-  {
+  for (day in days) {
     P = asin(0.39795 * cos(0.2163108 + 2 * atan(0.9671396 * tan(.00860 * (day - 186)))))
     
     D <- 24 - (24 / pi) * 
@@ -46,6 +44,7 @@ daylength <- function(days)
     
     result <- c(result, D)
   }
+  
   return(result)
 }
 
@@ -62,22 +61,20 @@ gasprice.per.week <- c(
   3.823, 3.86, 3.953, 3.907, 3.893, 3.911, 3.877, 3.787, 3.692, 3.677, 3.66,
   3.657, 3.637, 3.594, 3.545, 3.486, 3.471, 3.5
 )
-gasprice <- function(days)
-{
+gasprice <- function(days) {
   week.starts <- c(days[hourly.data[day.starts, "weekday"] == 1], length(days) + 1)
   result <- NULL
   current.monday <- 1
-  for (week in 1:length(week.starts))
-  {
+  for (week in 1:length(week.starts)) {
     next.monday <- week.starts[week]
     result <- c(result, rep(gasprice.per.week[week], next.monday - current.monday))
     current.monday <- next.monday
   }
+  
   return(result)
 }
 
-load.data <- function()
-{
+load.data <- function() {
   data <- data.frame(
     day=seq_along(day.starts),
     season=hourly.data[day.starts, "season"] %% 4 > 1,
@@ -119,15 +116,17 @@ load.data <- function()
     data[day, "casual"] <- sum(day.data$casual)
     data[day, "registered"] <- sum(day.data$registered)
   }
+  
   return(data)
 }
 ```
 
+Now let's make the hourly dataset a daily dataset by aggregating over the hour variable.
+
 ```{r}
 data <- load.data()
-write("Columns in the daily dataset:", stdout())
-write(colnames(data), stdout())
 ```
+
 Now that we have the data, let's make sure that the types are correct.
 
 ```{r}
@@ -138,7 +137,8 @@ scaled.data <- data.frame(scale(numeric.data))
 # put ordinal weather situation back in dataframes
 data <- cbind(numeric.data, weathersit=data$weathersit)
 scaled.data <- cbind(scaled.data, weathersit=data$weathersit)
-scaled.data$atemp[595] <- -scaled.data$atemp[595]  # reverse outlier
+
+# factorize the binary season, holiday, workingday, and rallyprotest variables
 factor.data <- cbind(
   subset(scaled.data, select=-c(season, holiday, workingday, rallyprotest)),
   season=as.factor(data$season),
@@ -146,13 +146,12 @@ factor.data <- cbind(
   workingday=as.factor(data$workingday),
   rallyprotest=as.factor(data$rallyprotest)
 )
-n.factor.data <- cbind(
-  subset(data, select=-c(season, holiday, workingday, rallyprotest)),
-  season=as.factor(data$season),
-  holiday=as.factor(data$holiday),
-  workingday=as.factor(data$workingday),
-  rallyprotest=as.factor(data$rallyprotest)
-)
+
+# write variables and variable types to notebook
+write("Variables in the daily dataset:", stdout())
+for (var in colnames(factor.data)) {
+  write(cat(var, ": ", class(factor.data[,var])), stdout())
+}
 ```
 
 ```{r include=FALSE}
@@ -161,6 +160,7 @@ remove.illegal.arcs <- function(g) {
   # remove arcs from numeric to non-numeric variables
   from.non.numeric.arcs <- arcs(g)[,"from"] %in% non.numeric.cols
   to.numeric.arcs <- !arcs(g)[,"to"] %in% non.numeric.cols
+  
   arcs(g) <- arcs(g)[to.numeric.arcs | from.non.numeric.arcs,]
   return(g)
 }
@@ -207,6 +207,7 @@ graphsMetrics <- function(titles) {
 }
 
 graphsArcsDists <- function(titles) {
+  # computes mean number of arcs and mean SID and SHD metrics compared to manual network
   ntitles <- length(titles)
   metrics <- data.frame(matrix(
     c(rep(0, len=5*ntitles), rep(Inf, len=2*ntitles)),
@@ -243,6 +244,7 @@ graphsArcsDists <- function(titles) {
 }
 
 compareArcs <- function(arcs1, arcs2) {
+  # determines whether arc sets are exactly the same
   n.arcs <- nrow(arcs1)
   n <- 0
   for (i in 1:n.arcs) {
@@ -256,6 +258,7 @@ compareArcs <- function(arcs1, arcs2) {
 }
 
 graphsMECs <- function(titles) {
+  # determines number of MECs in learned networks of each algorithm variant
   ntitles <- length(titles)
   metrics <- data.frame(matrix(
     rep(0, len=ntitles),
@@ -290,6 +293,7 @@ graphsMECs <- function(titles) {
 }
 
 graphsCentralities <- function(titles) {
+  # computes mean degree and betweenness graph centralities
   ntitles <- length(titles)
   metrics <- data.frame(matrix(
     rep(0, len=2*ntitles),
@@ -321,6 +325,7 @@ graphsCentralities <- function(titles) {
 }
 
 graphsReversals <- function(titles) {
+  # computes mean number of reversed edges in the learned networks
   ntitles <- length(titles)
   metrics <- data.frame(matrix(
     rep(0, len=ntitles),
@@ -349,6 +354,8 @@ graphsReversals <- function(titles) {
 }
 
 graphsConfMatrices <- function(titles) {
+  # computes mean true and false positives and true and false negatives of 
+  # learned CPDAGs compared to manual network
   ntitles <- length(titles)
   metrics <- data.frame(matrix(
     rep(0, len=4*ntitles),
@@ -380,6 +387,7 @@ graphsConfMatrices <- function(titles) {
 }
 
 graphsPageRanks <- function(titles) {
+  # computes mean PageRanks of each variable in the learned networks
   ntitles <- length(titles)
   pageRanks <- data.frame(matrix(
     rep(0, len=ncol(data)*ntitles),
@@ -401,7 +409,7 @@ graphsPageRanks <- function(titles) {
   return(pageRanks)
 }
 
-# initialize list that will hold graphs
+# initialize list that will hold all networks, starting with manual network
 graphs <- list(vector("list", 1))
 ```
 
@@ -453,7 +461,7 @@ manual.g <- dagitty(paste('dag {',
 '}'))
 manual.g <- model2network(toString(manual.g, "bnlearn"))
 
-# save network to lists and plot the network
+# save network to list and plot the network
 graphs[[1]][[1]] <- manual.g
 plot(manual.g, main="Manually constructed network")
 ```
@@ -463,7 +471,7 @@ We are finally ready to start trying out structure learning algorithms.
 First, we will try the hill climbing algorithm which learns structure based on a score.
 
 ```{r}
-# reset lists and set scores that will be used
+# reset list and set score functions that will be used
 graphs <- graphs[1]
 scores <- c("bic-cg", "pred-loglik-cg", "aic-cg", "loglik-cg")
 
@@ -476,18 +484,25 @@ factor.data80 <- factor.data100[1:cut,]
 factor.data20 <- factor.data100[(cut + 1):nrow(data),]
 
 # run all algorithm variants
-n.iters = 1
-random <- FALSE
+n.iters = 1  # number of networks learned per algorithm variant
+random <- FALSE  # whether to use a random or empty initial DAG
 run.networks(n.iters, 2 - random, hc, factor.data, score=scores[1])
 run.networks(n.iters, 2 - random, hc, factor.data80, score=scores[2], newdata=factor.data20)
 run.networks(n.iters, 2 - random, hc, factor.data, score=scores[3])
 run.networks(n.iters, 2 - random, hc, factor.data, score=scores[4])
+```
+We will evaluate the learned networks based on metrics and the PageRanks of
+each node in the learned networks.
 
-# compute and show the metrics
+```{r}
+# compute and show the metrics and PageRanks
 titles <- c("manual", scores)
 metrics <- graphsMetrics(titles); print(metrics)
 pageRanks <- graphsPageRanks(titles); print(pageRanks)
 ```
+
+Finally, we will inspect the learned networks themselves. The learned network
+with the smallest SID metric of each algorithm variant is shown.
 
 ```{r}
 for (i in 1:length(titles)) {
@@ -495,24 +510,32 @@ for (i in 1:length(titles)) {
   plot(graphs[[i]][[bestIdx]], main=sprintf("Best %s network", titles[i]))
 }
 ```
+
 ### PC
-Next, we will consider a variant of the PC algorithm.
+Next, we will consider an implementation of the PC algorithm.
 
 ```{r}
+# reset list and set alpha thresholds that will be used
 graphs <- graphs[1]
 alphas = c(0.0001, 0.001, 0.01, 0.05, 0.1)
 
 # run all algorithm variants
-n.iters = 1
+n.iters = 1  # number of networks learned per algorithm variant
 for (alpha in alphas) {
-  run.networks(n.iters, FALSE, pc.stable, factor.data, alpha=alpha)
+  run.networks(n.iters, 0, pc.stable, factor.data, alpha=alpha, test="mi-cg")
 }
+```
 
-# compute and show the metrics
+We will again inspect the metrics and PageRanks of the learned networks.
+
+``` {r}
+# compute and show the metrics and PageRanks
 titles = c("manual", paste0("alpha=", alphas))
 metrics <- graphsMetrics(titles); print(metrics)
 pageRanks <- graphsPageRanks(titles); print(pageRanks)
 ```
+
+Finally, we will inspect the learned networks of the PC algorithm.
 
 ```{r}
 for (i in 1:length(titles)) {
