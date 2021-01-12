@@ -386,6 +386,31 @@ graphsConfMatrices <- function(titles) {
   return(metrics)
 }
 
+graphsMatrixDists <- function(titles) {
+  ntitles <- length(titles)
+  metrics <- data.frame(matrix(
+    rep(0, len=(ntitles - 1)*(ntitles - 1)),
+    nrow=ntitles - 1,
+    ncol=ntitles - 1,
+    dimnames=list(titles[2:ntitles], titles[1:(ntitles - 1)])
+  ))
+  
+  for (i in 1:(ntitles - 1)) {
+    for (j in (i + 1):ntitles) {
+      n <- 0
+      for (k in 1:length(graphs[[i]])) {
+        for (l in 1:length(graphs[[j]])) {
+          shd <- hammingDist(amat(graphs[[i]][[k]]), amat(graphs[[j]][[l]]))
+          n <- n + 1
+          metrics[j - 1, i] <- metrics[j - 1, i] + (shd - metrics[j - 1, i]) / n
+        }
+      }
+    }
+  }
+  
+  return(metrics)
+}
+
 graphsPageRanks <- function(titles) {
   # computes mean PageRanks of each variable in the learned networks
   ntitles <- length(titles)
@@ -498,6 +523,7 @@ each node in the learned networks.
 # compute and show the metrics and PageRanks
 titles <- c("manual", scores)
 metrics <- graphsMetrics(titles); print(metrics)
+matrixDists <- graphsMatrixDists(titles); print(matrixDists)
 pageRanks <- graphsPageRanks(titles); print(pageRanks)
 ```
 
@@ -532,6 +558,7 @@ We will again inspect the metrics and PageRanks of the learned networks.
 # compute and show the metrics and PageRanks
 titles = c("manual", paste0("alpha=", alphas))
 metrics <- graphsMetrics(titles); print(metrics)
+matrixDists <- graphsMatrixDists(paste0("alpha=", alphas)); print(matrixDists)
 pageRanks <- graphsPageRanks(titles); print(pageRanks)
 ```
 
