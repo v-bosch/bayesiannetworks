@@ -194,14 +194,62 @@ tbl
 
 # predict users for different day lengths
 tbl <- data.frame(daylength=linspace(min(data$daylength), max(data$daylength), n=100))
-tbl$casual <- predict(fit, node="casual", data=tbl, method="bayes-lw")
-tbl$registered <- predict(fit, node="registered", data=tbl, method="bayes-lw")
-tbl
+
+season <- replicate(100, predict(fit, node="season", data=tbl, method="bayes-lw"))
+season <- data.frame(season=apply(season, 1, mean))
+season.casual <- replicate(100, predict(fit, node="casual", data=season, method="bayes-lw"))
+season.registered <- replicate(100, predict(fit, node="registered", data=season, method="bayes-lw"))
+season.casual <- apply(season.casual, 1, mean)
+season.registered <- apply(season.registered, 1, mean)
+
+tbl$casual <- (
+    predict(fit, node="casual", data=data.frame(season=mean(data$season)), method="bayes-lw") +
+    predict(fit, node="casual", data=tbl, method="bayes-lw") -
+    season.casual
+)
+tbl$registered <- (
+    predict(fit, node="registered", data=data.frame(season=mean(data$season)), method="bayes-lw") +
+    predict(fit, node="registered", data=tbl, method="bayes-lw") -
+    season.registered
+)
+ggplot(tbl) +
+    geom_point(aes(x=daylength, y=casual), colour="orange") +
+    geom_point(aes(x=daylength, y=registered), colour="blue")
 
 # predict registered users for different gas prices
-tbl <- data.frame(gasprice=linspace(3, 4, n=100))
-tbl$registered <- predict(fit, node="registered", data=tbl, method="bayes-lw")
-tbl
+tbl <- data.frame(gasprice=linspace(min(data$gasprice), max(data$gasprice), n=100))
+
+season <- replicate(100, predict(fit, node="season", data=tbl, method="bayes-lw"))
+season <- data.frame(season=apply(season, 1, mean))
+season.casual <- replicate(100, predict(fit, node="casual", data=season, method="bayes-lw"))
+season.registered <- replicate(100, predict(fit, node="registered", data=season, method="bayes-lw"))
+season.casual <- apply(season.casual, 1, mean)
+season.registered <- apply(season.registered, 1, mean)
+
+day <- replicate(100, predict(fit, node="day", data=tbl, method="bayes-lw"))
+day <- data.frame(day=apply(day, 1, mean))
+day.casual <- replicate(100, predict(fit, node="casual", data=day, method="bayes-lw"))
+day.registered <- replicate(100, predict(fit, node="registered", data=day, method="bayes-lw"))
+day.casual <- apply(day.casual, 1, mean)
+day.registered <- apply(day.registered, 1, mean)
+
+tbl$casual <- (
+    predict(fit, node="casual", data=data.frame(season=mean(data$season)), method="bayes-lw") +
+    predict(fit, node="casual", data=data.frame(day=mean(data$day)), method="bayes-lw") +
+    predict(fit, node="casual", data=tbl, method="bayes-lw") -
+    season.casual -
+    day.casual
+)
+tbl$registered <- (
+    predict(fit, node="registered", data=data.frame(season=mean(data$season)), method="bayes-lw") +
+    predict(fit, node="registered", data=data.frame(day=mean(data$day)), method="bayes-lw") +
+    predict(fit, node="registered", data=tbl, method="bayes-lw") -
+    season.registered -
+    day.registered
+)
+ggplot(tbl) +
+    geom_point(aes(x=gasprice, y=casual), colour="orange") +
+    geom_point(aes(x=gasprice, y=registered), colour="blue")
 
 # predict casual users for events
 tbl <- expand.grid(rallyprotest=c(1, 0))
